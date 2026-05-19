@@ -213,7 +213,38 @@ Return JSON with this structure:
 Return ONLY the JSON object, no explanation, no markdown code blocks.\
 """
 
-_JSON_BLOCK = re.compile(r"\{.*\}", re.DOTALL)
+def _extract_first_json(text: str) -> str | None:
+    """
+    Extract the first complete, balanced JSON object from text.
+    Handles nested objects and strings containing braces.
+    More robust than a greedy regex when the LLM emits extra content after the JSON.
+    """
+    depth = 0
+    start = None
+    in_string = False
+    escape_next = False
+
+    for i, ch in enumerate(text):
+        if escape_next:
+            escape_next = False
+            continue
+        if ch == "\\" and in_string:
+            escape_next = True
+            continue
+        if ch == '"':
+            in_string = not in_string
+            continue
+        if in_string:
+            continue
+        if ch == "{":
+            if depth == 0:
+                start = i
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0 and start is not None:
+                return text[start : i + 1]
+    return None
 
 
 def normalize_table(table: dict) -> dict | None:
@@ -245,8 +276,8 @@ def normalize_table(table: dict) -> dict | None:
     raw_text = re.sub(r"^```(?:json)?\s*", "", raw_text)
     raw_text = re.sub(r"\s*```$", "", raw_text)
 
-    m = _JSON_BLOCK.search(raw_text)
-    if not m:
+    json_str = _extract_first_json(raw_text)
+    if not json_str:
         log.warning(
             "    No JSON in LLM response for table %d of %s",
             table["table_index"],
@@ -255,7 +286,7 @@ def normalize_table(table: dict) -> dict | None:
         return None
 
     try:
-        normalized = json.loads(m.group())
+        normalized = json.loads(json_str)
     except json.JSONDecodeError as exc:
         log.warning(
             "    JSON parse error for table %d: %s", table["table_index"], exc
