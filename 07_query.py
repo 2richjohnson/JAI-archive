@@ -30,7 +30,7 @@ DUCKDB_PATH = BASE_DIR / "duckdb" / "jai.db"
 OLLAMA_HOST = os.environ.get("OLLAMA_HOST", "http://localhost:11434")
 OLLAMA_MODEL = "llama3.1:8b"
 EMBED_MODEL = "nomic-embed-text"
-COLLECTION_NAME = "jai_documents"
+COLLECTION_NAME = "jai_archive"
 TOP_K = 5
 
 # ── Prompts ────────────────────────────────────────────────────────────────────
@@ -51,23 +51,30 @@ SQL_GEN_PROMPT = """\
 You are a SQL expert for a nuclear consulting archive database.
 Write a DuckDB SQL query that answers the question.
 
-Main view: tables_all
-Metadata columns (always present):
-  _source_doc     TEXT    — source filename (e.g. "JAI-490.md")
-  _table_type     TEXT    — "capacity", "cost", "specifications", "timeline", "other"
-  _description    TEXT    — what the table shows
-  _year           INTEGER — year or NULL
-  _entity         TEXT    — country, utility, or site name, or NULL
-  _section_header TEXT    — section heading in source document
-  _confidence     TEXT    — "high", "medium", "low"
+PREFER the specialized views below over tables_all for capacity/storage questions:
+
+  capacity_normalized -- best for wet/dry storage capacity questions
+    country       TEXT   -- country or entity name
+    wet_mtu       DOUBLE -- wet storage capacity in MTU (already numeric, NULL if unknown)
+    dry_mtu       DOUBLE -- dry storage capacity in MTU (already numeric, NULL if unknown)
+    wet_storage_raw TEXT -- original string value
+    dry_storage_raw TEXT -- original string value
+    _source_doc, _description, _confidence, _table_index
+
+  tables_all -- raw union of all extracted tables (use when capacity_normalized lacks the data)
+    _source_doc TEXT, _table_type TEXT, _entity TEXT, _year INTEGER,
+    _description TEXT, _section_header TEXT, _confidence TEXT
+    (data columns vary -- always double-quote names with spaces)
 
 {schema_hint}
 
 Rules:
+- For storage/capacity questions, query capacity_normalized ONLY — never UNION it with tables_all
 - Use ILIKE for case-insensitive text matching
-- Cast numeric columns with TRY_CAST(col AS DOUBLE) when needed
-- If column names are uncertain, use SELECT * and filter on _table_type
-- Include _source_doc in SELECT so results can be cited
+- Country names in capacity_normalized are full names (e.g. "United Kingdom" not "UK")
+- For geographic aggregations (e.g. "European total"), return all rows — the answer layer will filter by region
+- Always include _source_doc or country in SELECT so results can be cited
+- For aggregations (SUM, total), filter out NULL values with WHERE col IS NOT NULL
 
 Question: {question}
 
@@ -152,19 +159,36 @@ def semantic_search(question: str) -> list[dict]:
 
 
 # ── Structured (DuckDB) ────────────────────────────────────────────────────────
+_INTERNAL_COLS = {"filename", "_source_doc", "_section_header", "_table_index",
+                  "_table_type", "_description", "_year", "_entity", "_confidence",
+                  "_notes", "_extracted_at"}
+
 def _schema_hint(con) -> str:
-    """Best-effort: get non-metadata column names from tables_all."""
+    """
+    Concise schema hint for SQL generation — keeps prompt short enough for llama3.1:8b.
+    Focuses on capacity_normalized (most useful view) and available countries.
+    """
+    _EUROPEAN = {"France", "Germany", "United Kingdom", "Sweden", "Finland",
+                 "Switzerland", "Belgium", "Spain", "Netherlands", "Czech Republic",
+                 "Slovakia", "Hungary", "Bulgaria", "Romania", "Slovenia"}
     try:
-        cols = con.execute(
-            "SELECT column_name FROM (DESCRIBE SELECT * FROM tables_all LIMIT 0) "
-            "WHERE column_name NOT LIKE '\\_%' ESCAPE '\\'"
+        countries = con.execute(
+            "SELECT DISTINCT country FROM capacity_normalized "
+            "WHERE country IS NOT NULL ORDER BY country"
         ).fetchall()
-        names = [r[0] for r in cols]
-        if names:
-            return f"Data columns (vary by table type): {', '.join(names)}"
+        all_c = [r[0] for r in countries]
+        eu_c = [c for c in all_c if c in _EUROPEAN]
+        non_eu_c = [c for c in all_c if c not in _EUROPEAN]
+        parts = [f"All countries in capacity_normalized: {', '.join(all_c)}"]
+        if eu_c:
+            parts.append(f"European countries in data: {', '.join(eu_c)}")
+        if non_eu_c:
+            parts.append(f"Non-European: {', '.join(non_eu_c)}")
+        parts.append("For raw table queries, double-quote column names with spaces.")
+        return "\n".join(parts)
     except Exception:
         pass
-    return "Data column names vary by table type — use SELECT * when uncertain."
+    return ""
 
 
 def structured_query(question: str, verbose: bool = False) -> dict:

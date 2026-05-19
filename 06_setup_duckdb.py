@@ -73,12 +73,13 @@ def setup_database(rebuild: bool = False):
         count = con.execute(f"SELECT COUNT(*) FROM {view}").fetchone()[0]
         log.info("View %-26s → %d rows", repr(view), count)
 
-    # Unified view across all types
-    union_sql = " UNION ALL ".join(
-        f"SELECT * FROM read_parquet('{parquet_glob(t)}', union_by_name=true)"
-        for t in available_types
+    # Unified view across all types — single read_parquet with glob so
+    # union_by_name reconciles differing schemas without a column-count mismatch.
+    all_glob = str(TABLES_DIR / "**" / "*.parquet")
+    con.execute(
+        f"CREATE OR REPLACE VIEW tables_all AS "
+        f"SELECT * FROM read_parquet('{all_glob}', union_by_name=true, filename=true)"
     )
-    con.execute(f"CREATE OR REPLACE VIEW tables_all AS {union_sql}")
     total = con.execute("SELECT COUNT(*) FROM tables_all").fetchone()[0]
     log.info("View %-26s → %d rows (all types)", repr("tables_all"), total)
 
@@ -102,6 +103,55 @@ def setup_database(rebuild: bool = False):
     """)
     summary_count = con.execute("SELECT COUNT(*) FROM tables_summary").fetchone()[0]
     log.info("View %-26s → %d tables", repr("tables_summary"), summary_count)
+
+    # Normalized capacity view — unifies column name variants across documents.
+    # Different source documents used different headers for the same concept;
+    # COALESCE picks the first non-null value across known aliases.
+    con.execute("""
+        CREATE OR REPLACE VIEW capacity_normalized AS
+        SELECT
+            _source_doc,
+            _table_index,
+            _entity                                              AS country,
+            _description,
+            _confidence,
+            COALESCE(
+                "Installed Wet Storage Capacity (MTU)",
+                "Wet Storage (MTU)",
+                "Wet Storage"
+            )                                                    AS wet_storage_raw,
+            COALESCE(
+                "Installed Dry Storage Capacity (MTU)",
+                "Dry Storage (MTU)",
+                "Dry Storage"
+            )                                                    AS dry_storage_raw,
+            TRY_CAST(
+                REPLACE(REPLACE(REPLACE(COALESCE(
+                    "Installed Wet Storage Capacity (MTU)",
+                    "Wet Storage (MTU)",
+                    "Wet Storage"
+                ), ',', ''), '~', ''), '-', '')
+            AS DOUBLE)                                           AS wet_mtu,
+            TRY_CAST(
+                REPLACE(REPLACE(REPLACE(COALESCE(
+                    "Installed Dry Storage Capacity (MTU)",
+                    "Dry Storage (MTU)",
+                    "Dry Storage"
+                ), ',', ''), '~', ''), '-', '')
+            AS DOUBLE)                                           AS dry_mtu
+        FROM tables_all
+        WHERE _entity IS NOT NULL
+          AND (
+            "Installed Wet Storage Capacity (MTU)" IS NOT NULL OR
+            "Wet Storage (MTU)"                    IS NOT NULL OR
+            "Wet Storage"                          IS NOT NULL OR
+            "Installed Dry Storage Capacity (MTU)" IS NOT NULL OR
+            "Dry Storage (MTU)"                    IS NOT NULL OR
+            "Dry Storage"                          IS NOT NULL
+          )
+    """)
+    cap_count = con.execute("SELECT COUNT(*) FROM capacity_normalized").fetchone()[0]
+    log.info("View %-26s → %d rows", repr("capacity_normalized"), cap_count)
 
     con.close()
     log.info("Database ready: %s", DUCKDB_PATH)
