@@ -149,6 +149,28 @@ def setup_database(rebuild: bool = False):
             "Dry Storage (MTU)"                    IS NOT NULL OR
             "Dry Storage"                          IS NOT NULL
           )
+
+        UNION ALL
+
+        -- Fallback: rows where the numeric value landed in column_name
+        -- and context confirms it is a wet-storage capacity row
+        SELECT
+            _source_doc,
+            _table_index,
+            _entity                                              AS country,
+            _description,
+            _confidence,
+            column_name                                          AS wet_storage_raw,
+            NULL                                                 AS dry_storage_raw,
+            TRY_CAST(
+                REPLACE(REPLACE(REPLACE(column_name, ',', ''), '~', ''), '-', '')
+            AS DOUBLE)                                           AS wet_mtu,
+            NULL::DOUBLE                                         AS dry_mtu
+        FROM tables_all
+        WHERE _entity IS NOT NULL
+          AND column_name IS NOT NULL
+          AND LOWER(_description) LIKE '%wet storage%'
+          AND TRY_CAST(REPLACE(REPLACE(column_name, ',', ''), '~', '') AS DOUBLE) IS NOT NULL
     """)
     cap_count = con.execute("SELECT COUNT(*) FROM capacity_normalized").fetchone()[0]
     log.info("View %-26s → %d rows", repr("capacity_normalized"), cap_count)

@@ -36,7 +36,7 @@ LOGS_DIR = BASE_DIR / "logs"
 MANIFEST_PATH = BASE_DIR / "tables" / "manifest.json"
 
 TABLE_TYPES = ["capacity", "cost", "specifications", "timeline", "other"]
-OLLAMA_MODEL = "llama3.1:8b"
+OLLAMA_MODEL = "llama3.2:3b"
 OLLAMA_HOST = os.environ.get("OLLAMA_HOST", "http://localhost:11434")
 
 MIN_DATA_ROWS = 1
@@ -260,7 +260,7 @@ def normalize_table(table: dict) -> dict | None:
         response = client.generate(
             model=OLLAMA_MODEL,
             prompt=prompt,
-            options={"temperature": 0, "num_ctx": 4096},
+            options={"temperature": 0, "num_ctx": 2048},
         )
         raw_text = response.get("response", "").strip()
     except Exception as exc:
@@ -392,7 +392,17 @@ def process_file(md_path: Path, dry_run: bool) -> dict:
             stats["failed"] += 1
             continue
 
-        out = save_to_parquet(normalized, table)
+        try:
+            out = save_to_parquet(normalized, table)
+        except Exception as exc:
+            log.warning(
+                "    Failed to save table %d of %s: %s",
+                table["table_index"],
+                source_doc,
+                exc,
+            )
+            stats["failed"] += 1
+            continue
         if out:
             stats["normalized"] += 1
         else:
