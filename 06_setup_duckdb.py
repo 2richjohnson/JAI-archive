@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
 """
-06_setup_duckdb.py — Initialize DuckDB and create views over extracted Parquet files.
+06_setup_duckdb.py — Build DuckDB from EAV Parquet files produced by 05_extract_tables.py.
 
-Run after 05_extract_tables.py has produced Parquet output.
 Creates ~/jai-archive/duckdb/jai.db with:
-  - tables_<type>   — one view per table type
-  - tables_all      — union across all types (union_by_name handles schema variation)
-  - tables_summary  — one row per extracted table (no row-level data)
+  - facts            — all EAV rows, single unified schema
+  - facts_capacity   — capacity-type rows
+  - facts_specs      — specifications-type rows
+  - facts_cost       — cost-type rows
+  - capacity_summary — one row per (country, attribute) with max value_numeric
+  - cask_summary     — one row per (cask_model, attribute) with value
 
 Usage:
     python 06_setup_duckdb.py [--rebuild]
-
-    --rebuild   Delete and recreate the database from scratch
 """
 
 import argparse
@@ -22,10 +22,9 @@ from pathlib import Path
 import duckdb
 
 BASE_DIR = Path.home() / "jai-archive"
-TABLES_DIR = BASE_DIR / "tables" / "parquet"
+TABLES_DIR = BASE_DIR / "tables" / "eav"
 DUCKDB_DIR = BASE_DIR / "duckdb"
 DUCKDB_PATH = DUCKDB_DIR / "jai.db"
-TABLE_TYPES = ["capacity", "cost", "specifications", "timeline", "other"]
 
 logging.basicConfig(
     level=logging.INFO,
@@ -33,14 +32,6 @@ logging.basicConfig(
     stream=sys.stdout,
 )
 log = logging.getLogger(__name__)
-
-
-def parquet_glob(table_type: str) -> str:
-    return str(TABLES_DIR / table_type / "*.parquet")
-
-
-def has_parquet(table_type: str) -> bool:
-    return bool(list((TABLES_DIR / table_type).glob("*.parquet")))
 
 
 def setup_database(rebuild: bool = False):
@@ -53,127 +44,117 @@ def setup_database(rebuild: bool = False):
     con = duckdb.connect(str(DUCKDB_PATH))
     log.info("Connected to %s", DUCKDB_PATH)
 
-    available_types = [t for t in TABLE_TYPES if has_parquet(t)]
-    if not available_types:
-        log.warning(
-            "No Parquet files found under %s — run 05_extract_tables.py first",
-            TABLES_DIR,
-        )
+    parquet_files = list(TABLES_DIR.glob("*.parquet"))
+    if not parquet_files:
+        log.warning("No EAV Parquet files found under %s — run 05_extract_tables.py first", TABLES_DIR)
         con.close()
         return
 
-    # Per-type views
-    for t in available_types:
-        glob = parquet_glob(t)
-        view = f"tables_{t}"
-        con.execute(
-            f"CREATE OR REPLACE VIEW {view} AS "
-            f"SELECT * FROM read_parquet('{glob}', union_by_name=true)"
-        )
+    eav_glob = str(TABLES_DIR / "*.parquet")
+
+    # Main facts table — EAV, single schema.
+    # Explicit CASTs guard against parquet files where a column is all-NULL
+    # (DuckDB infers NULL type, which then fails in aggregations like MAX()).
+    con.execute(f"""
+        CREATE OR REPLACE VIEW facts AS
+        SELECT
+            CAST(entity          AS VARCHAR) AS entity,
+            CAST(entity_type     AS VARCHAR) AS entity_type,
+            CAST(row_label       AS VARCHAR) AS row_label,
+            CAST(attribute       AS VARCHAR) AS attribute,
+            CAST(value_raw       AS VARCHAR) AS value_raw,
+            TRY_CAST(value_numeric AS DOUBLE)  AS value_numeric,
+            CAST(unit            AS VARCHAR) AS unit,
+            CAST(line_item_type  AS VARCHAR) AS line_item_type,
+            CAST(_source_doc     AS VARCHAR) AS _source_doc,
+            CAST(_table_type     AS VARCHAR) AS _table_type,
+            TRY_CAST(_year         AS INTEGER) AS _year,
+            TRY_CAST(_currency_year AS INTEGER) AS _currency_year,
+            CAST(_confidence     AS VARCHAR) AS _confidence
+        FROM read_parquet('{eav_glob}', union_by_name=true)
+    """)
+    total = con.execute("SELECT COUNT(*) FROM facts").fetchone()[0]
+    log.info("View %-22s → %d rows", repr("facts"), total)
+
+    # Per-type filtered views
+    for table_type in ("capacity", "specifications", "cost", "timeline", "other"):
+        view = f"facts_{table_type}"
+        con.execute(f"""
+            CREATE OR REPLACE VIEW {view} AS
+            SELECT * FROM facts WHERE _table_type = '{table_type}'
+        """)
         count = con.execute(f"SELECT COUNT(*) FROM {view}").fetchone()[0]
-        log.info("View %-26s → %d rows", repr(view), count)
+        log.info("View %-22s → %d rows", repr(view), count)
 
-    # Unified view across all types — single read_parquet with glob so
-    # union_by_name reconciles differing schemas without a column-count mismatch.
-    all_glob = str(TABLES_DIR / "**" / "*.parquet")
-    con.execute(
-        f"CREATE OR REPLACE VIEW tables_all AS "
-        f"SELECT * FROM read_parquet('{all_glob}', union_by_name=true, filename=true)"
-    )
-    total = con.execute("SELECT COUNT(*) FROM tables_all").fetchone()[0]
-    log.info("View %-26s → %d rows (all types)", repr("tables_all"), total)
-
-    # Summary view: one row per extracted table, no row-level data
+    # capacity_summary: best numeric value per (country, attribute)
+    # Useful for "which countries have wet storage > X MTU" queries
     con.execute("""
-        CREATE OR REPLACE VIEW tables_summary AS
+        CREATE OR REPLACE VIEW capacity_summary AS
         SELECT
-            _source_doc,
-            _table_type,
-            _table_index,
-            _description,
-            _year,
-            _entity,
-            _confidence,
-            _section_header,
-            _extracted_at,
-            COUNT(*) AS row_count
-        FROM tables_all
-        GROUP BY ALL
-        ORDER BY _source_doc, _table_index
-    """)
-    summary_count = con.execute("SELECT COUNT(*) FROM tables_summary").fetchone()[0]
-    log.info("View %-26s → %d tables", repr("tables_summary"), summary_count)
-
-    # Normalized capacity view — unifies column name variants across documents.
-    # Different source documents used different headers for the same concept;
-    # COALESCE picks the first non-null value across known aliases.
-    con.execute("""
-        CREATE OR REPLACE VIEW capacity_normalized AS
-        SELECT
-            _source_doc,
-            _table_index,
-            _entity                                              AS country,
-            _description,
-            _confidence,
-            COALESCE(
-                "Installed Wet Storage Capacity (MTU)",
-                "Wet Storage (MTU)",
-                "Wet Storage"
-            )                                                    AS wet_storage_raw,
-            COALESCE(
-                "Installed Dry Storage Capacity (MTU)",
-                "Dry Storage (MTU)",
-                "Dry Storage"
-            )                                                    AS dry_storage_raw,
-            TRY_CAST(
-                REPLACE(REPLACE(REPLACE(COALESCE(
-                    "Installed Wet Storage Capacity (MTU)",
-                    "Wet Storage (MTU)",
-                    "Wet Storage"
-                ), ',', ''), '~', ''), '-', '')
-            AS DOUBLE)                                           AS wet_mtu,
-            TRY_CAST(
-                REPLACE(REPLACE(REPLACE(COALESCE(
-                    "Installed Dry Storage Capacity (MTU)",
-                    "Dry Storage (MTU)",
-                    "Dry Storage"
-                ), ',', ''), '~', ''), '-', '')
-            AS DOUBLE)                                           AS dry_mtu
-        FROM tables_all
-        WHERE _entity IS NOT NULL
-          AND (
-            "Installed Wet Storage Capacity (MTU)" IS NOT NULL OR
-            "Wet Storage (MTU)"                    IS NOT NULL OR
-            "Wet Storage"                          IS NOT NULL OR
-            "Installed Dry Storage Capacity (MTU)" IS NOT NULL OR
-            "Dry Storage (MTU)"                    IS NOT NULL OR
-            "Dry Storage"                          IS NOT NULL
+            entity                           AS country,
+            attribute,
+            MAX(value_numeric)               AS value_numeric,
+            ANY_VALUE(unit)                  AS unit,
+            COUNT(DISTINCT _source_doc)      AS source_docs,
+            MAX(_confidence)                 AS best_confidence
+        FROM facts
+        WHERE entity_type IN ('country', 'facility')
+          AND value_numeric IS NOT NULL
+          AND attribute IN (
+            'wet_storage_mtu', 'dry_storage_mtu', 'total_storage_mtu',
+            'wet_storage_pwr_mtu', 'wet_storage_candu_mtu',
+            'current_inventory_mtu', 'current_inventory_mthm',
+            'nominal_pond_capacity_mthm', 'design_capacity_mthm',
+            'design_capacity_mtu', 'net_capacity_mw', 'year_of_saturation',
+            'expected_fuel_40yr_mthm', 'committed_reprocessing_mthm',
+            'direct_disposal_mthm', 'percent_occupied'
           )
+        GROUP BY entity, attribute
+        ORDER BY entity, attribute
+    """)
+    cap_count = con.execute("SELECT COUNT(*) FROM capacity_summary").fetchone()[0]
+    log.info("View %-22s → %d rows", repr("capacity_summary"), cap_count)
 
-        UNION ALL
+    # cask_summary: latest value per (cask_model, attribute)
+    con.execute("""
+        CREATE OR REPLACE VIEW cask_summary AS
+        SELECT
+            entity                           AS cask_model,
+            attribute,
+            ANY_VALUE(value_raw)                             AS value_raw,
+            MAX(value_numeric)               AS value_numeric,
+            ANY_VALUE(unit)                  AS unit,
+            ANY_VALUE(_source_doc)           AS source_doc
+        FROM facts
+        WHERE entity_type = 'cask_model'
+          AND entity IS NOT NULL
+        GROUP BY entity, attribute
+        ORDER BY entity, attribute
+    """)
+    cask_count = con.execute("SELECT COUNT(*) FROM cask_summary").fetchone()[0]
+    log.info("View %-22s → %d rows", repr("cask_summary"), cask_count)
 
-        -- Fallback: rows where the numeric value landed in column_name
-        -- and context confirms it is a wet-storage capacity row
+    # cost_summary: line items per cost study
+    con.execute("""
+        CREATE OR REPLACE VIEW cost_summary AS
         SELECT
             _source_doc,
-            _table_index,
-            _entity                                              AS country,
-            _description,
-            _confidence,
-            column_name                                          AS wet_storage_raw,
-            NULL                                                 AS dry_storage_raw,
-            TRY_CAST(
-                REPLACE(REPLACE(REPLACE(column_name, ',', ''), '~', ''), '-', '')
-            AS DOUBLE)                                           AS wet_mtu,
-            NULL::DOUBLE                                         AS dry_mtu
-        FROM tables_all
-        WHERE _entity IS NOT NULL
-          AND column_name IS NOT NULL
-          AND LOWER(_description) LIKE '%wet storage%'
-          AND TRY_CAST(REPLACE(REPLACE(column_name, ',', ''), '~', '') AS DOUBLE) IS NOT NULL
+            _year                            AS study_year,
+            _currency_year                   AS currency_year,
+            entity,
+            row_label,
+            attribute,
+            value_raw,
+            value_numeric,
+            unit,
+            line_item_type,
+            _confidence
+        FROM facts
+        WHERE _table_type = 'cost'
+        ORDER BY _source_doc, entity, row_label
     """)
-    cap_count = con.execute("SELECT COUNT(*) FROM capacity_normalized").fetchone()[0]
-    log.info("View %-26s → %d rows", repr("capacity_normalized"), cap_count)
+    cost_count = con.execute("SELECT COUNT(*) FROM cost_summary").fetchone()[0]
+    log.info("View %-22s → %d rows", repr("cost_summary"), cost_count)
 
     con.close()
     log.info("Database ready: %s", DUCKDB_PATH)
@@ -183,22 +164,35 @@ def print_info():
     if not DUCKDB_PATH.exists():
         return
     con = duckdb.connect(str(DUCKDB_PATH), read_only=True)
-    print("\n── Contents ──────────────────────────────────────")
+    print("\n── Facts breakdown ──────────────────────────────────")
     try:
-        rows = con.execute(
-            "SELECT _table_type, COUNT(*) AS rows, COUNT(DISTINCT _source_doc) AS docs "
-            "FROM tables_all GROUP BY _table_type ORDER BY rows DESC"
-        ).fetchall()
+        rows = con.execute("""
+            SELECT _table_type, entity_type, COUNT(*) AS rows,
+                   COUNT(DISTINCT _source_doc) AS docs
+            FROM facts
+            GROUP BY _table_type, entity_type
+            ORDER BY rows DESC
+        """).fetchall()
         for r in rows:
-            print(f"  {r[0]:<20} {r[1]:>6} rows  ({r[2]} source doc(s))")
-        print()
+            print(f"  {(r[0] or 'NULL'):<16} {(r[1] or 'NULL'):<14} {r[2]:>6} rows  ({r[3]} source doc(s))")
 
-        docs = con.execute(
-            "SELECT DISTINCT _source_doc FROM tables_all ORDER BY _source_doc"
-        ).fetchall()
-        print("── Source documents ──────────────────────────────")
-        for (d,) in docs:
-            print(f"  {d}")
+        print()
+        print("── Top capacity attributes ──────────────────────────")
+        rows = con.execute("""
+            SELECT attribute, COUNT(*) AS n, COUNT(DISTINCT entity) AS entities
+            FROM capacity_summary GROUP BY attribute ORDER BY n DESC LIMIT 10
+        """).fetchall()
+        for r in rows:
+            print(f"  {r[0]:<35} {r[1]:>4} rows  {r[2]:>3} entities")
+
+        print()
+        print("── Cask models found ────────────────────────────────")
+        rows = con.execute("""
+            SELECT cask_model, COUNT(DISTINCT attribute) AS attrs
+            FROM cask_summary GROUP BY cask_model ORDER BY cask_model LIMIT 20
+        """).fetchall()
+        for r in rows:
+            print(f"  {r[0]:<30} {r[1]:>3} attributes")
     except Exception as exc:
         print(f"  (could not read summary: {exc})")
     print()
@@ -206,14 +200,9 @@ def print_info():
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Initialize DuckDB for JAI archive structured tables."
-    )
-    parser.add_argument(
-        "--rebuild", action="store_true", help="Drop and recreate the database"
-    )
+    parser = argparse.ArgumentParser(description="Build EAV DuckDB for JAI archive.")
+    parser.add_argument("--rebuild", action="store_true", help="Drop and recreate the database")
     args = parser.parse_args()
-
     setup_database(rebuild=args.rebuild)
     print_info()
 

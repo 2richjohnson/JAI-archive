@@ -1,0 +1,172 @@
+{
+  "version": "1.0",
+  "description": "Canonical attribute registry for JAI nuclear consulting archive EAV extraction",
+  "domains": [
+    {
+      "name": "storage_capacity",
+      "description": "Country or facility-level spent fuel storage capacity",
+      "entity_types": ["country", "facility"],
+      "attributes": [
+        {"name": "wet_storage_mtu",          "description": "Wet (pool) storage capacity",                              "unit": "MTU",    "aliases": ["Installed Wet Storage Capacity (MTU)", "Wet Storage (MTU)", "Wet Storage"]},
+        {"name": "dry_storage_mtu",          "description": "Dry cask/vault storage capacity",                          "unit": "MTU",    "aliases": ["Installed Dry Storage Capacity (MTU)", "Dry Storage (MTU)", "Dry Storage"]},
+        {"name": "total_storage_mtu",        "description": "Total wet+dry storage capacity",                           "unit": "MTU",    "aliases": ["Total (MTU)"]},
+        {"name": "wet_storage_pwr_mtu",      "description": "Wet storage capacity for PWR fuel",                        "unit": "MTU",    "aliases": ["PWR (MTU)"]},
+        {"name": "wet_storage_candu_mtu",    "description": "Wet storage capacity for CANDU fuel",                      "unit": "MTU",    "aliases": ["CANDU (MTU)"]},
+        {"name": "current_inventory_mtu",    "description": "Current stored fuel inventory",                            "unit": "MTU",    "aliases": ["Current Inventory (MTU)", "Stored Fuel (MTU)", "Inventory"]},
+        {"name": "current_inventory_mthm",   "description": "Current stored fuel inventory",                            "unit": "MTHM",   "aliases": ["Inventory (MTHM)"]},
+        {"name": "nominal_pond_capacity_mthm","description": "Nominal at-reactor pond capacity",                        "unit": "MTHM",   "aliases": ["Nominal Pond Capacity (MTHM)"]},
+        {"name": "design_capacity_mthm",     "description": "Licensed/design storage capacity",                         "unit": "MTHM",   "aliases": ["Design Capacity (MTHM)"]},
+        {"name": "design_capacity_mtu",      "description": "Licensed/design storage capacity",                         "unit": "MTU",    "aliases": ["Design Capacity (MTU)"]},
+        {"name": "net_capacity_mw",          "description": "Net electrical capacity of nuclear power plant",           "unit": "MW",     "aliases": ["Net Capacity (MW)"]},
+        {"name": "year_of_saturation",       "description": "Projected year when storage capacity will be full",        "unit": "year",   "aliases": ["Year of Saturation"]},
+        {"name": "project_afr_capacity_mthm","description": "Projected AFR/AR storage facility capacity",               "unit": "MTHM",   "aliases": ["Project Capacity of AR and AFR Storage Facilities"]}
+      ]
+    },
+    {
+      "name": "inventory_management",
+      "description": "Spent fuel management quantities and facility lifecycle data",
+      "entity_types": ["country", "facility", "utility"],
+      "attributes": [
+        {"name": "committed_reprocessing_mthm","description": "Fuel committed for reprocessing",                        "unit": "MTHM",   "aliases": ["Committed Quantities for Reprocessing (MTHM)"]},
+        {"name": "direct_disposal_mthm",     "description": "Fuel designated for direct disposal",                      "unit": "MTHM",   "aliases": ["Quantities for Direct Disposal or Reprocessing (MTHM)"]},
+        {"name": "expected_fuel_40yr_mthm",  "description": "Total expected spent fuel over 40-year plant life",        "unit": "MTHM",   "aliases": ["Total Expected Spent Fuel in 40 years (MTHM)"]},
+        {"name": "operating_period",         "description": "Current or planned operating period",                      "unit": "years",  "aliases": ["Operating Period", "Current Accountancy Lifetime (Years)"]},
+        {"name": "planned_operating_life",   "description": "Planned total operating lifetime",                         "unit": "years",  "aliases": ["Planned Operating Life"]},
+        {"name": "start_of_operation",       "description": "Year operation began or is planned to begin",              "unit": "year",   "aliases": ["Start of Operation", "Start of Operation (Year)"]},
+        {"name": "licensing_status",         "description": "Current regulatory/licensing status",                      "unit": null,     "aliases": ["Licensing Status"]},
+        {"name": "percent_occupied",         "description": "Percentage of storage capacity currently occupied",        "unit": "%",      "aliases": ["% Occupied"]},
+        {"name": "empty_slots",              "description": "Number of empty storage slots",                            "unit": "assemblies", "aliases": ["Empty Slots "]},
+        {"name": "empty_slots_pwr",          "description": "Empty PWR fuel storage slots",                             "unit": "assemblies", "aliases": ["Empty Slots PWR"]},
+        {"name": "empty_slots_bwr",          "description": "Empty BWR fuel storage slots",                             "unit": "assemblies", "aliases": ["Empty Slots BWR"]}
+      ]
+    },
+    {
+      "name": "assemblies_in_storage",
+      "description": "Count of fuel assemblies currently in storage at a facility",
+      "entity_types": ["facility", "utility"],
+      "attributes": [
+        {"name": "assemblies_stored_total",  "description": "Total fuel assemblies currently in storage",               "unit": "assemblies", "aliases": ["Number of Assemblies in Storage Total", "Number ofAssemblies in Storage", "Number ofAssemblies in Storage Total"]},
+        {"name": "assemblies_stored_pwr",    "description": "PWR fuel assemblies currently in storage",                 "unit": "assemblies", "aliases": ["Number of Assemblies in Storage PWR", "Number ofAssemblies in Storage PWR"]},
+        {"name": "assemblies_stored_bwr",    "description": "BWR fuel assemblies currently in storage",                 "unit": "assemblies", "aliases": ["Number of Assemblies in Storage BWR", "Number ofAssemblies in Storage BWR"]}
+      ]
+    },
+    {
+      "name": "cask_capacity",
+      "description": "Fuel assembly capacity of casks, canisters, and storage modules",
+      "entity_types": ["cask_model"],
+      "attributes": [
+        {"name": "fuel_assembly_capacity",   "description": "Number of fuel assemblies the cask/canister holds",        "unit": "assemblies", "aliases": ["No. Fuel Assemblies", "Capacity (assys)", "Capacity (intact assemblies)", "Capacity", "No. of Fuel Assemblies FAs/MTU"]},
+        {"name": "dsc_capacity",             "description": "DSC (Dry Shielded Canister) assembly capacity",            "unit": "assemblies", "aliases": ["Capacity (DSC)", "a. Capacity (DSC)", "a. Capacity (intact assemblies)"]},
+        {"name": "mpc_capacity",             "description": "MPC (Multi-Purpose Canister) assembly capacity",           "unit": "assemblies", "aliases": ["Capacity (MPC)"]},
+        {"name": "msb_capacity",             "description": "MSB (Multi-Assembly Sealed Basket) capacity",              "unit": "assemblies", "aliases": ["Capacity (MSB)"]},
+        {"name": "tsc_capacity",             "description": "TSC (Transportable Storage Canister) capacity",            "unit": "assemblies", "aliases": ["Capacity (TSC)"]},
+        {"name": "canister_capacity",        "description": "Canister capacity (canisters per storage position)",       "unit": "canisters",  "aliases": ["Capacity (Canister)", "Capacity (canisters)"]}
+      ]
+    },
+    {
+      "name": "cask_dimensions",
+      "description": "Physical dimensions of casks, canisters, and storage modules",
+      "entity_types": ["cask_model"],
+      "attributes": [
+        {"name": "overall_length_in",                    "description": "Overall length (no impact limiters)",          "unit": "in",     "aliases": ["Overall Length", "Dimensions (Overall Length)", "Length"]},
+        {"name": "overall_length_with_limiters_in",      "description": "Overall length with impact limiters attached",  "unit": "in",     "aliases": ["Overall Length w/ impact limiters", "Overall Length w/Impact Limiters", "Overall Length, with Collar"]},
+        {"name": "overall_length_without_limiters_in",   "description": "Overall length without impact limiters",       "unit": "in",     "aliases": ["Overall Length w/o impact limiters", "Overall Length, w/o Collar"]},
+        {"name": "overall_cross_section_in",             "description": "Outer diameter or overall cross-section",      "unit": "in",     "aliases": ["Overall Cross Section", "Nominal Cross Section", "Overall Diameter", "Dimensions (Overall Cross Section)", "Width"]},
+        {"name": "overall_cross_section_with_limiters_in","description": "Cross-section with impact limiters",          "unit": "in",     "aliases": ["Overall Cross Section w/ impact limiters"]},
+        {"name": "overall_cross_section_without_limiters_in","description": "Cross-section without impact limiters",    "unit": "in",     "aliases": ["Overall Cross Section w/o impact limiters"]},
+        {"name": "cavity_length_in",                     "description": "Internal fuel cavity length",                  "unit": "in",     "aliases": ["Cavity Length", "Dimensions (Cavity Length)"]},
+        {"name": "cavity_cross_section_in",              "description": "Internal cavity diameter or cross-section",    "unit": "in",     "aliases": ["Cavity Cross Section", "Dimensions (Cavity Cross Section)"]},
+        {"name": "wall_thickness_in",                    "description": "Outer wall/shell thickness",                   "unit": "in",     "aliases": ["Wall Thickness", "Side Thickness", "Dimensions (Wall Thickness)"]},
+        {"name": "lid_thickness_in",                     "description": "Top lid thickness",                            "unit": "in",     "aliases": ["Lid Thickness", "Top Lid Thickness", "Dimensions (Lid Thickness)"]},
+        {"name": "bottom_thickness_in",                  "description": "Bottom plate/lid thickness",                   "unit": "in",     "aliases": ["Bottom Thickness", "Dimensions (Bottom Thickness)"]},
+        {"name": "basket_length_in",                     "description": "Fuel basket length",                           "unit": "in",     "aliases": ["Basket Length"]},
+        {"name": "neutron_shield_thickness_in",          "description": "Neutron shielding layer thickness",            "unit": "in",     "aliases": ["Neutron Shield", "Neutron Shield (in)", "Neutron Shield (in.)", "Neutron Shield Thickness (in)"]},
+        {"name": "concrete_thickness_in",                "description": "Concrete shielding thickness",                 "unit": "in",     "aliases": ["Concrete Thickness"]},
+        {"name": "steel_inner_shell_thickness_in",       "description": "Inner steel shell thickness",                  "unit": "in",     "aliases": ["Steel Inner Shell Thickness"]},
+        {"name": "height_in",                            "description": "Module or module-plus-lid height",             "unit": "in",     "aliases": ["Height"]}
+      ]
+    },
+    {
+      "name": "cask_weight",
+      "description": "Cask and canister weights in various loading configurations",
+      "entity_types": ["cask_model"],
+      "attributes": [
+        {"name": "weight_empty_lb",          "description": "Empty cask weight without fuel",                           "unit": "lb",     "aliases": ["Empty", "Weight (Empty)", "Weight, Empty", "Maximum Weight (Empty)", "Empty Weight, w/o Collar", "Empty Cask w/o Impact Limiters", "Empty Weight, with Collar"]},
+        {"name": "weight_loaded_lb",         "description": "Loaded cask weight with fuel",                             "unit": "lb",     "aliases": ["Loaded", "Weight (Loaded)", "Maximum Weight (Loaded)", "Loaded, with Impact Limiters"]},
+        {"name": "weight_lb",                "description": "Weight (see row label for configuration)",                  "unit": "lb",     "aliases": ["Weight", "Weight (lb)", "Maximum Weight (lb)", "b. Weight (lb)", "b. Maximum Weight (lb)"]},
+        {"name": "max_weight_lb",            "description": "Maximum gross weight",                                     "unit": "lb",     "aliases": ["Maximum Weight", "Maximum Loaded Weight"]},
+        {"name": "weight_loaded_tons",       "description": "Loaded weight in short tons",                              "unit": "tons",   "aliases": ["Loaded Weight (tons)"]},
+        {"name": "weight_without_limiters_lb","description": "Loaded weight without impact limiters",                   "unit": "lb",     "aliases": ["Loaded, without Impact Limiters"]},
+        {"name": "weight_mpc24_lb",          "description": "Loaded weight configured with MPC-24",                     "unit": "lb",     "aliases": ["Loaded w/ MPC-24"]},
+        {"name": "weight_mpc24e_lb",         "description": "Loaded weight configured with MPC-24E/EF",                 "unit": "lb",     "aliases": ["Loaded w/ MPC-24E/EF"]},
+        {"name": "weight_mpc32_lb",          "description": "Loaded weight configured with MPC-32",                     "unit": "lb",     "aliases": ["Loaded w/ MPC-32"]},
+        {"name": "weight_mpc68_lb",          "description": "Loaded weight configured with MPC-68/68F/68FF",            "unit": "lb",     "aliases": ["Loaded w/ MPC-68/68F/68FF"]}
+      ]
+    },
+    {
+      "name": "cask_thermal_radiological",
+      "description": "Thermal performance, radiation dose, burnup, and fuel limits for casks",
+      "entity_types": ["cask_model"],
+      "attributes": [
+        {"name": "thermal_heat_rejection_kw","description": "Maximum heat load / thermal design heat rejection",        "unit": "kW",         "aliases": ["Thermal Design Heat Rejection", "Thermal Design Heat Rejection (kW)", "Design Heat Rejection (kW)", "design heat rejection", "designHeatRejection", "Thermal", "c. Thermal"]},
+        {"name": "surface_dose_mremhr",      "description": "Outside surface gamma/neutron dose rate",                  "unit": "mrem/hr",    "aliases": ["Outside Surface Dose (mrem/hr)", "Outside Surface Dose, Side", "g. Outside Surface Dose (mrem/hr)", "h. Outside Surface Dose (mrem/hr)"]},
+        {"name": "total_dose_mremhr",        "description": "Calculated total dose rate",                               "unit": "mrem/hr",    "aliases": ["Calculated Total Dose Rates (mrem/hr)"]},
+        {"name": "max_burnup_gwdmtu",        "description": "Maximum allowable fuel burnup",                            "unit": "GWD/MTU",    "aliases": ["Maximum Burnup", "Maximum Burnup (GWD/MTU)"]},
+        {"name": "max_heat_per_assy_kw",     "description": "Maximum decay heat per fuel assembly",                     "unit": "kW",         "aliases": ["Maximum Per Assy Heat Load", "Maximum Per Assy Heat Load (kW)"]},
+        {"name": "peak_cladding_temp_c",     "description": "Peak fuel cladding temperature during normal storage",     "unit": "°C",         "aliases": ["Peak Cladding Temperature (°C)"]},
+        {"name": "max_leak_rate",            "description": "Maximum allowable helium/air leak rate",                   "unit": "atm-cm³/s",  "aliases": ["Maximum Leak Rate", "Maximum Leak Rate (atm- cm 3 /sec)", "Maximum Leak Rate (atm-cm 3 /s, air)", "Maximum Leak Rate (atm-cm 3 /sec)", "Maximum Leak Rate (atm-cm 3 /sec, air)", "h. Maximum Leak Rate (atm-cm 3 /sec)", "i. Maximum Leak Rate (atm-cm 3 /sec)"]}
+      ]
+    },
+    {
+      "name": "cask_construction",
+      "description": "Materials, seals, atmosphere, and component types for casks and canisters",
+      "entity_types": ["cask_model"],
+      "attributes": [
+        {"name": "shape",                    "description": "Physical shape of cask/module",                            "unit": null,     "aliases": ["Shape", "c. Shape", "d. Shape"]},
+        {"name": "fuel_type",                "description": "Fuel type accepted (PWR, BWR, CANDU, etc.)",               "unit": null,     "aliases": ["Fuel Type", "Fuel Type (Natural U)"]},
+        {"name": "cask_body_material",       "description": "Primary structural/shielding material of cask body",      "unit": null,     "aliases": ["Cask Body", "Materials of Construction", "f. Materials of Construction"]},
+        {"name": "canister_body_material",   "description": "Canister shell material",                                  "unit": null,     "aliases": ["Canister Body", "Canister Body Material"]},
+        {"name": "canister_internals_material","description": "Canister basket/poison plate material",                  "unit": null,     "aliases": ["Canister Internals", "Canister Internals Material"]},
+        {"name": "shield_plugs_material",    "description": "Radiation shield plugs material",                          "unit": null,     "aliases": ["Shield Plugs", "Shield Plugs Material"]},
+        {"name": "cavity_atmosphere",        "description": "Gas atmosphere inside cask cavity (He, N2, etc.)",         "unit": null,     "aliases": ["Cavity Atmosphere", "Cask Cavity Atmosphere", "g. Cavity Atmosphere", "g. Cask Cavity Atmosphere"]},
+        {"name": "cask_seals",               "description": "Cask primary and secondary seal description",              "unit": null,     "aliases": ["Cask Seals"]},
+        {"name": "transfer_cask_type",       "description": "Type of on-site metal transfer cask",                      "unit": null,     "aliases": ["Transfer Cask", "Type of Metal On-Site Transfer Cask", "Type of Transfer Cask"]},
+        {"name": "transport_cask_type",      "description": "Type of licensed transport cask",                          "unit": null,     "aliases": ["Transport Cask", "Type of Transport Cask"]},
+        {"name": "dsc_type",                 "description": "DSC model/type designation",                               "unit": null,     "aliases": ["DSC"]},
+        {"name": "mpc_type",                 "description": "MPC model/type designation",                               "unit": null,     "aliases": ["Type of Multi-Purpose Canister"]},
+        {"name": "tsc_type",                 "description": "TSC model/type designation",                               "unit": null,     "aliases": ["Type of Transportable Storage Canister"]},
+        {"name": "hsm_type",                 "description": "HSM (Horizontal Storage Module) type",                     "unit": null,     "aliases": ["HSM", "Type of Horizontal Storage"]},
+        {"name": "vcc_type",                 "description": "VCC (Vertical Concrete Cask) type",                        "unit": null,     "aliases": ["Type of Vertical Concrete Cask"]},
+        {"name": "number_of_cooling_fins",   "description": "Number of external passive cooling fins",                  "unit": "count",  "aliases": ["Number of Cooling Fins:"]},
+        {"name": "basket_type",              "description": "Fuel basket configuration description",                    "unit": null,     "aliases": ["Basket"]}
+      ]
+    },
+    {
+      "name": "facility_identification",
+      "description": "Names and identifiers for facilities, utilities, and nuclear power plants",
+      "entity_types": ["facility", "utility"],
+      "attributes": [
+        {"name": "facility_name",            "description": "Facility or nuclear power plant name",                     "unit": null,     "aliases": ["Facility", "Name of Facility", "Name", "NPP", "Nuclear Power Plant", "Station"]},
+        {"name": "utility_name",             "description": "Utility or operating organization",                        "unit": null,     "aliases": ["Utility"]},
+        {"name": "storage_location",         "description": "Physical storage location description",                    "unit": null,     "aliases": ["Storage Location"]}
+      ]
+    },
+    {
+      "name": "cost_items",
+      "description": "Cost study and economic analysis line items",
+      "entity_types": ["cost_study"],
+      "attributes": [
+        {"name": "cost_transportation_m",    "description": "Spent fuel transportation cost",                           "unit": "M$",     "aliases": []},
+        {"name": "cost_storage_facility_m",  "description": "Storage facility capital/operating cost",                  "unit": "M$",     "aliases": []},
+        {"name": "cost_disposal_m",          "description": "Final disposal cost",                                      "unit": "M$",     "aliases": []},
+        {"name": "cost_handling_loading_m",  "description": "Fuel handling and loading cost",                           "unit": "M$",     "aliases": []},
+        {"name": "cost_monitored_storage_m", "description": "Monitored retrievable storage cost",                       "unit": "M$",     "aliases": []},
+        {"name": "cost_subtotal_m",          "description": "Subtotal cost category",                                   "unit": "M$",     "aliases": []},
+        {"name": "cost_total_m",             "description": "Total program cost",                                       "unit": "M$",     "aliases": []},
+        {"name": "cost_unit_per_mthm",       "description": "Unit cost per metric tonne heavy metal",                   "unit": "$/MTHM", "aliases": []},
+        {"name": "cost_contingency_m",       "description": "Cost contingency or reserve",                              "unit": "M$",     "aliases": []},
+        {"name": "cost_line_item",           "description": "Generic cost line item — see row_label for description",   "unit": "M$",     "aliases": ["column_name"]}
+      ]
+    }
+  ]
+}
