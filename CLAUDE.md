@@ -15,7 +15,7 @@ natural language questions over a document set that is heavily tabular.
   - `~/projects/JAI-archive/` (canonical)
   - `~/jai-archive/` (user runs scripts from here)
 - **Local dev machine** (`/home/bbbb/projects/JAI-archive/`): scripts + git only — no markdown/parquet data here
-- **ChromaDB**: `~/jai-archive/db/` — collection `jai_archive`, 1367 documents
+- **ChromaDB**: `~/jai-archive/db/` — collection `jai_archive`, 1367 documents (170/177 markdown files; 7 excluded as junk — MS Office temp files and image-only pages)
 - **Markdown source**: `~/jai-archive/markdown/` (177 files)
 - **DuckDB**: `~/jai-archive/duckdb/jai.db`
 - **Canonical attribute registry**: `~/jai-archive/attribute_registry.json` (also in projects/)
@@ -176,6 +176,17 @@ Table formats:
 - `tall` — rows are attributes of one entity (key-value structure)
 - `cost` — rows are line items with one or more value columns
 
+## Query Routing (07_query.py)
+Three keyword shortcut lists bypass the LLM router for reliability:
+- `_SEMANTIC_KEYWORDS` — "tell me about", "explain", "summarize", "what is/are", "how does/do", etc. → always SEMANTIC
+- `_SPECS_KEYWORDS` — cask/canister model names, vendor names, spec terms → always HYBRID
+- `_CAPACITY_KEYWORDS` — MTU, wet/dry storage, inventory, saturation → always STRUCTURED
+- LLM router handles anything not matched by the above; defaults to HYBRID on uncertain output.
+
+**ChromaDB embedding**: The collection was indexed with `nomic-embed-text` (768-dim) via Ollama.
+`semantic_search()` must use `query_embeddings` (pre-embedded via Ollama) — **never `query_texts`**,
+which invokes ChromaDB's default 384-dim embedder and silently returns empty results.
+
 ## Known Issues / Behavior
 - `entity_column` returned by LLM may be canonical name (e.g. "cask_model") not original header ("Cask Designation"); `_col_index()` normalizes both sides to alphanumeric for matching
 - `entity_type` varies slightly in LLM output ("cask_design" vs "cask_model"); acceptable
@@ -185,6 +196,11 @@ Table formats:
 - **Junk cask_model entities**: LLM occasionally classifies stray numbers, file paths, or table footers as `entity_type=cask_model`; filter with `WHERE LENGTH(cask_model) > 3 AND cask_model NOT REGEXP '^[0-9.]+$'`
 - **NULL units in capacity rows**: Some extracted capacity values have `unit IS NULL` despite being MTU; likely a prompting gap in 05_extract_tables.py
 - **Data quality**: All known issues above become less severe with 70B model (see AWS plan below)
+
+## Query System Status (as of 2026-05-23)
+- **Validated end-to-end** with real questions: semantic, structured, and hybrid paths all working
+- All three routing paths tested: rotary dissolvers (semantic ✅), wet storage capacity (structured ✅), transnuclear cask assemblies (hybrid ✅)
+- ChromaDB current: 170/177 files indexed; 7 excluded (junk)
 
 ## Extraction Progress (as of 2026-05-21)
 - Extraction **completed** 2026-05-20 after two crash/resume cycles
