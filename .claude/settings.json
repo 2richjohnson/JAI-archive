@@ -1,0 +1,21 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(sshpass*)",
+      "Bash(ssh *)",
+      "Bash(nvidia-smi*)",
+      "Bash(systemctl*)",
+      "Bash(journalctl*)",
+      "Bash(curl*)",
+      "Bash(find *)",
+      "Bash(grep *)",
+      "Bash(tail*)",
+      "Bash(wc *)",
+      "Bash(ls*)",
+      "Bash(ps *)",
+      "Bash(ss *)",
+      "Bash(tmux*)",
+      "Bash(sleep*)"
+    ]
+  }
+}
