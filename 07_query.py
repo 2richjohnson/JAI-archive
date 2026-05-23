@@ -41,6 +41,11 @@ def _llm(prompt: str, model: str = LLM_MODEL) -> str:
 
 # ── Routing ────────────────────────────────────────────────────────────────────
 # Keyword shortcuts that bypass the LLM router for reliability
+_SEMANTIC_KEYWORDS = [
+    "tell me about", "what is", "what are", "describe", "explain",
+    "how does", "how do", "how are", "how is", "why ", "background on",
+    "overview of", "history of", "summarize", "summary of",
+]
 _CAPACITY_KEYWORDS = [
     "which countries", "wet storage", "dry storage", "storage capacity",
     "mtu by country", "mtu by", "capacity over", "capacity greater",
@@ -74,6 +79,10 @@ def route(question: str, verbose: bool = False) -> str:
         if verbose:
             print(f"[router] keyword → STRUCTURED (capacity query)")
         return "structured"
+    if any(kw in q for kw in _SEMANTIC_KEYWORDS):
+        if verbose:
+            print(f"[router] keyword → SEMANTIC (descriptive query)")
+        return "semantic"
     decision = _llm(ROUTER_PROMPT.format(question=question)).split()[0].upper()
     if decision not in ("STRUCTURED", "SEMANTIC", "HYBRID"):
         decision = "HYBRID"
@@ -121,6 +130,7 @@ SQL_RULES = """
 Rules:
 - Use capacity_summary for country/facility storage capacity questions. Its key column is 'country' (not 'entity').
 - Use cask_summary for cask specifications. Its key column is 'cask_model' (not 'entity').
+- cask_model values are specific model names like 'TN-68', 'HI-STORM 100', 'VSC-24' — never vendor names. For vendor queries use ILIKE: e.g. transnuclear → ILIKE 'TN-%', holtec → ILIKE 'HI-%', nuhoms → ILIKE 'NUHOMS%'.
 - Use cost_summary for cost study data. Use facts only if a view lacks a needed column.
 - EAV structure: each attribute is a SEPARATE ROW — never try to pivot two attributes into one row.
   For multiple attributes, use: WHERE attribute IN ('a','b') and accept multiple rows, or use two subqueries.
@@ -187,6 +197,18 @@ def _doc_filter(question: str) -> dict | None:
     return None
 
 
+EMBED_MODEL = "nomic-embed-text"
+
+
+def _embed(text: str) -> list[float] | None:
+    try:
+        client = ollama.Client(host=OLLAMA_HOST)
+        r = client.embeddings(model=EMBED_MODEL, prompt=text)
+        return r.get("embedding")
+    except Exception:
+        return None
+
+
 def semantic_search(question: str, force_filter: dict | None = None) -> list[dict]:
     try:
         client = chromadb.PersistentClient(path=str(CHROMA_PATH))
@@ -194,7 +216,11 @@ def semantic_search(question: str, force_filter: dict | None = None) -> list[dic
     except Exception:
         return []
 
-    kwargs = {"query_texts": [question], "n_results": TOP_K}
+    embedding = _embed(question)
+    if embedding is None:
+        return []
+
+    kwargs = {"query_embeddings": [embedding], "n_results": TOP_K}
     doc_filter = force_filter or _doc_filter(question)
     if doc_filter:
         kwargs["where_document"] = doc_filter
@@ -204,7 +230,7 @@ def semantic_search(question: str, force_filter: dict | None = None) -> list[dic
     except Exception:
         # Retry without filter if it fails (e.g., no matching docs)
         try:
-            results = col.query(query_texts=[question], n_results=TOP_K)
+            results = col.query(query_embeddings=[embedding], n_results=TOP_K)
         except Exception:
             return []
 
