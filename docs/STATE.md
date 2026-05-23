@@ -1,41 +1,40 @@
 # JAI Archive — Project State
 
-## Last Session Summary (2026-05-21)
+## Last Session Summary (2026-05-23)
 
 ### What We Accomplished
 - **Diagnosed VM crash loop**: `ollama-gpu1.service` + `ollama.service` both auto-started on boot, both loaded llama3.1:8b (4.58 GiB) onto GPU1 simultaneously, exceeding 8 GiB VRAM → hard VM reset with no OOM warning. Confirmed via `journalctl -b -1`.
 - **Disabled gpu1 service**: `systemctl disable --now ollama-gpu1.service`. Primary Ollama with `OLLAMA_NUM_PARALLEL=2` handles both GPUs internally.
 - **Completed EAV extraction**: 177 markdown files → ~549 parquet files → 6,396 facts rows in DuckDB. Extraction ran ~4.5 hours in tmux, survived two crash/resume cycles.
 - **Ingested two new documents** (2026-05-21) via the full ingest pipeline.
-- **Fixed DuckDB schema errors**:
-  - Explicit `CAST()` on all columns in facts view to prevent NULL-type inference errors
-  - Fixed `cask_summary`: replaced `FIRST(value_raw ORDER BY _extracted_at DESC)` with `ANY_VALUE(value_raw)` (column doesn't exist)
-  - Fixed `cost_summary`: removed missing `_description`/`_table_index` columns
-  - Added `facts_timeline`, `facts_other` views
-- **Fixed SQL generation quality** in `07_query.py`: tightened SQL_RULES with explicit column names (`country` not `entity`), EAV row semantics explanation, example queries.
-- **Added `ingest.sh`**: new 4-step resumable pipeline (OCR → markdown → EAV extraction → DuckDB rebuild).
-- **Added `08_export_excel.py`** and `attribute_registry.json` to repo.
-- **Set up git credential store** (`~/.git-credentials` + `credential.helper=store`) so pushes work without prompting.
-- **Committed and pushed all changes** to GitHub (5 commits, `d7a5ceb`).
-- **CLAUDE.md updated**: pipeline diagram, Ollama crash details, Claude Code SSH permissions, AWS scaling plan, known data quality issues, extraction completion status, correct DuckDB view schema.
+- **Fixed DuckDB schema errors**, added `ingest.sh`, `08_export_excel.py`, `attribute_registry.json`. Pushed to GitHub (`d7a5ceb`).
+
+## Last Session Summary (2026-05-23)
+
+### What We Accomplished
+- **Fixed ChromaDB silent failure**: `07_query.py` was using `query_texts` which invoked ChromaDB's default 384-dim embedder, but the index was built with `nomic-embed-text` (768-dim) via Ollama. Every semantic search silently threw a dimension mismatch exception and returned `[]`. Fixed by adding `_embed()` using Ollama and switching to `query_embeddings`. Matches how `03_ingest.py` built the collection.
+- **Fixed LLM router misclassification**: Descriptive questions ("tell me about X") were being routed to STRUCTURED by the LLM, skipping semantic search entirely. Added `_SEMANTIC_KEYWORDS` shortcut list (mirrors existing `_CAPACITY_KEYWORDS` / `_SPECS_KEYWORDS` pattern) so narrative questions bypass the LLM router.
+- **Fixed SQL vendor matching**: Added SQL rule clarifying `cask_model` values are specific model names (e.g. `TN-68`), not vendor names — vendor queries should use `ILIKE 'TN-%'` etc.
+- **Validated all three routing paths** interactively: semantic (rotary dissolvers ✅), structured (wet storage > 5000 MTU ✅), hybrid (transnuclear cask assemblies ✅).
+- **Committed and pushed** (`0e461e4`).
 
 ### What's Broken or Incomplete
 - **Data quality issues** (known, not yet fixed):
   - HTML entities in entity names (e.g. `&#124;` instead of `|`)
   - Junk `cask_model` entities (stray numbers, file paths, table footers)
   - NULL units on some capacity rows
-- **Query system tested structurally but not validated end-to-end** with real questions against live data.
-- **ChromaDB / semantic search** not re-indexed after new documents were added — unclear if new docs are in the vector store.
+- **ChromaDB** — unclear if the two new docs ingested 2026-05-21 were embedded into the vector store (03_ingest.py may not have been re-run after ingest).
+- **SQL structured results sparse for cask queries** — `fuel_assembly_capacity` attribute mostly missing from `cask_summary` due to dirty 8B extraction; semantic path picks up the slack but structured data is thin.
 
 ---
 
-## Current Focus (2026-05-21)
+## Current Focus (2026-05-23)
 
-Pipeline is fully operational end-to-end. Immediate priorities before scaling:
+Query system is validated and working. Next priorities:
 
-1. **Validate the query system** — run `python 07_query.py --interactive` on VM and test 3–5 real questions covering capacity, cask specs, and cost data. Confirm routing, SQL generation, and synthesis are working correctly.
-2. **Check ChromaDB** — verify new docs are indexed; re-run embedding ingest if not.
-3. **Data quality triage** — decide whether to fix HTML entity / junk-entity issues now (small script) or defer until 70B model reprocessing on AWS.
+1. **Check ChromaDB indexing for new docs** — verify the two docs added 2026-05-21 are in the vector store; re-run `python 03_ingest.py` if not.
+2. **Data quality triage** — decide whether to fix HTML entity / junk-entity issues now (small script) or defer until 70B model reprocessing on AWS.
+3. **AWS scaling** — when ready, spin up g5.12xlarge spot, pull llama3.1:70B, re-run extraction with `--workers 4`.
 
 ---
 
