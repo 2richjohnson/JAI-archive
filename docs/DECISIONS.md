@@ -44,6 +44,40 @@
 
 ---
 
+## 2026-05-23: Fix semantic search — use Ollama embeddings for ChromaDB queries
+
+**Decision**: Replace `query_texts` with `query_embeddings` in `semantic_search()`, embedding via `ollama.embeddings(model="nomic-embed-text")`.
+
+**Context**: Every semantic search was silently returning empty. Root cause: `query_texts` invokes ChromaDB's default all-MiniLM-L6-v2 embedder (384-dim), but the collection was built by `03_ingest.py` using `nomic-embed-text` (768-dim). ChromaDB throws a dimension mismatch exception which `semantic_search()` catches and swallows, returning `[]` every time.
+
+**Rationale**: Query embedding must match index embedding. The fix mirrors exactly what `03_ingest.py` does. Added `_embed()` helper using `ollama.Client` so the same model/host config applies.
+
+**Do not use `query_texts`** with this collection unless the collection is rebuilt with ChromaDB's default embedder.
+
+---
+
+## 2026-05-23: Keyword shortcut for semantic routing
+
+**Decision**: Add `_SEMANTIC_KEYWORDS` list to bypass LLM router for descriptive questions.
+
+**Context**: The LLM router misclassified narrative questions ("tell me about rotary dissolvers") as STRUCTURED, so semantic search was never called despite relevant content existing in ChromaDB. This mirrors the existing `_CAPACITY_KEYWORDS` and `_SPECS_KEYWORDS` shortcuts.
+
+**Rationale**: LLM routing is unreliable for open-ended descriptive questions. Keyword shortcuts are deterministic and fast. Phrases like "tell me about", "explain", "summarize", "what is/are", "how does/do" reliably signal semantic intent.
+
+**Trade-off**: Keyword list needs manual maintenance as new question patterns emerge. Acceptable — the LLM router handles anything not matched.
+
+---
+
+## 2026-05-23: 7 markdown files excluded from ChromaDB — confirmed junk
+
+**Decision**: Do not index the 7 markdown files missing from ChromaDB. No action needed.
+
+**Context**: Audit found 170/177 markdown files indexed. The 7 missing: four `~$`-prefixed MS Office temp/lock files (no real content), two "Photos and Such" image-only pages, one Index file (table of contents only).
+
+**Rationale**: None contain queryable text. Indexing them would add noise to semantic search results.
+
+---
+
 ## 2026-05-21: Two-pass extraction design in 05_extract_tables.py
 
 **Decision**: Split LLM involvement into Pass 1 (schema inference) and Pass 2 (Python row iteration).
