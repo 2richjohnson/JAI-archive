@@ -10,6 +10,18 @@
 
 ---
 
+## Last Session Summary (2026-05-24)
+
+### What We Accomplished
+- **Fixed docling CUDA crash in `02_convert.py`**: GTX 1070 is Pascal (sm_61); PyTorch on Python 3.14 only provides CUDA 12.x builds which dropped sm_61 support, and no cu118 wheels exist for Python 3.14. Fixed by forcing `AcceleratorDevice.CPU` via `PdfPipelineOptions` / `PdfFormatOption`. Confirmed clean startup.
+- **Added `02_convert.py` to git repo**: Was previously VM-only; now tracked in `projects/JAI-archive/` and synced to both VM locations.
+- Pushed `f63e8c5`.
+
+### What's Broken or Incomplete
+- Nothing new. Ingest pipeline is operational again.
+
+---
+
 ## Last Session Summary (2026-05-23)
 
 ### What We Accomplished
