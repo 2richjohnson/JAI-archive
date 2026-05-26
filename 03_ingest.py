@@ -1,15 +1,19 @@
 #!/usr/bin/env python3
 """
-03_ingest.py — Index markdown files into ChromaDB with heading-aware chunking.
+03_ingest.py — Index documents into ChromaDB with heading-aware chunking.
 
-Each chunk is prefixed with [doc_id], document title, and section heading so
-the LLM always has structural context. Metadata includes doc_id, doc_family,
-title, and section for reliable filtering.
+Primary source: wiki articles from ~/jai-archive/wiki/ (if any exist).
+Fallback source: raw markdown from ~/jai-archive/markdown/ (backward compatible).
+
+Wiki articles include enhanced metadata: entity_type, entity_name, source_documents,
+article_section — enabling filtered retrieval by entity type or name.
 
 Usage:
     python 03_ingest.py              # skip already-indexed files
     python 03_ingest.py --rebuild    # wipe collection and re-index everything
-    python 03_ingest.py --file X.md  # re-index one file only
+    python 03_ingest.py --file X.md  # re-index one file only (markdown mode)
+    python 03_ingest.py --source wiki      # force wiki/ source
+    python 03_ingest.py --source markdown  # force markdown/ source
 """
 
 import argparse
@@ -21,12 +25,23 @@ import chromadb
 import ollama
 
 MARKDOWN_DIR = Path.home() / "jai-archive/markdown"
+WIKI_DIR = Path.home() / "jai-archive/wiki"
 DB_PATH = str(Path.home() / "jai-archive/db")
 COLLECTION_NAME = "jai_archive"
 EMBED_MODEL = "nomic-embed-text"
 CHUNK_WORDS = 400
 OVERLAP_WORDS = 50
 MIN_CHUNK_CHARS = 60
+
+WIKI_SUBDIRS = ["casks", "countries", "vendors", "regulatory", "facilities", "topics"]
+WIKI_SUBDIR_TO_TYPE: dict[str, str] = {
+    "casks":      "CASK",
+    "countries":  "COUNTRY",
+    "vendors":    "VENDOR",
+    "regulatory": "REGULATORY",
+    "facilities": "FACILITY",
+    "topics":     "TOPIC",
+}
 
 
 def get_embedding(text: str) -> list[float] | None:
@@ -158,12 +173,102 @@ def ingest_file(md_file: Path, collection, rebuild: bool = False) -> int:
     return count
 
 
+def _wiki_entity_meta(wiki_file: Path) -> dict:
+    """Extract entity_type and entity_name from wiki article path and content."""
+    subdir = wiki_file.parent.name
+    entity_type = WIKI_SUBDIR_TO_TYPE.get(subdir, "TOPIC")
+    entity_name = wiki_file.stem.replace("_", " ")
+
+    # Parse source JAI doc IDs from the "## Source Documents" section
+    source_docs = ""
+    try:
+        text = wiki_file.read_text()
+        src_m = re.search(r'## Source Documents\n(.*?)(?=\n##|\Z)', text, re.DOTALL)
+        if src_m:
+            doc_ids = re.findall(r'JAI-[\w]+', src_m.group(1))
+            source_docs = ", ".join(doc_ids)
+    except Exception:
+        pass
+
+    return {
+        "entity_type": entity_type,
+        "entity_name": entity_name,
+        "source_documents": source_docs,
+    }
+
+
+def ingest_wiki_file(wiki_file: Path, collection, rebuild: bool = False) -> int:
+    """
+    Ingest a wiki article into ChromaDB with enhanced entity metadata.
+    Source key uses the subdir/filename path so wiki and markdown articles
+    occupy separate namespaces.
+    """
+    source_key = str(wiki_file.relative_to(WIKI_DIR))
+
+    if not rebuild:
+        existing = collection.get(where={"source": source_key})
+        if existing and existing["ids"]:
+            return -1  # skipped
+
+    # Remove stale chunks for this article
+    try:
+        old = collection.get(where={"source": source_key})
+        if old and old["ids"]:
+            collection.delete(ids=old["ids"])
+    except Exception:
+        pass
+
+    text = wiki_file.read_text()
+    entity_name = wiki_file.stem.replace("_", " ")
+    meta = _wiki_entity_meta(wiki_file)
+    chunks = chunk_document(text, entity_name)
+
+    count = 0
+    for i, (chunk_text, section) in enumerate(chunks):
+        if len(chunk_text.strip()) < MIN_CHUNK_CHARS:
+            continue
+        embedding = get_embedding(chunk_text)
+        if embedding is None:
+            continue
+        collection.upsert(
+            ids=[f"wiki_{wiki_file.stem}_chunk_{i}"],
+            embeddings=[embedding],
+            documents=[chunk_text],
+            metadatas=[{
+                "source":           source_key,
+                "doc_id":           wiki_file.stem,
+                "doc_family":       meta["entity_type"],
+                "title":            entity_name,
+                "section":          section,
+                "chunk":            i,
+                "entity_type":      meta["entity_type"],
+                "entity_name":      meta["entity_name"],
+                "source_documents": meta["source_documents"],
+                "article_section":  section,
+            }],
+        )
+        count += 1
+    return count
+
+
+def _wiki_articles() -> list[Path]:
+    """Return all wiki articles across all subdirectories, sorted."""
+    articles: list[Path] = []
+    for subdir in WIKI_SUBDIRS:
+        d = WIKI_DIR / subdir
+        if d.exists():
+            articles.extend(d.glob("*.md"))
+    return sorted(articles)
+
+
 def main():
-    parser = argparse.ArgumentParser(description="Ingest markdown into ChromaDB.")
+    parser = argparse.ArgumentParser(description="Ingest documents into ChromaDB.")
     parser.add_argument("--rebuild", action="store_true",
                         help="Wipe existing collection and re-index everything")
     parser.add_argument("--file", type=str, default=None,
-                        help="Re-index a single file (by name, e.g. JAI-N006a.md)")
+                        help="Re-index a single markdown file (by name, e.g. JAI-N006a.md)")
+    parser.add_argument("--source", choices=["wiki", "markdown", "auto"], default="auto",
+                        help="Source to ingest: wiki/, markdown/, or auto-detect (default: auto)")
     args = parser.parse_args()
 
     client = chromadb.PersistentClient(path=DB_PATH)
@@ -180,6 +285,7 @@ def main():
         metadata={"hnsw:space": "cosine"},
     )
 
+    # Single-file mode always uses markdown source
     if args.file:
         md_file = MARKDOWN_DIR / args.file
         if not md_file.exists():
@@ -189,20 +295,37 @@ def main():
         print(f"{md_file.name}: {n} chunks indexed.")
         return
 
-    md_files = sorted(MARKDOWN_DIR.glob("*.md"))
-    if not md_files:
-        print("No markdown files found.")
+    # Determine source: wiki/ if it has articles, otherwise markdown/
+    wiki_article_list = _wiki_articles()
+    use_wiki = (
+        args.source == "wiki"
+        or (args.source == "auto" and bool(wiki_article_list))
+    )
+
+    if use_wiki:
+        source_files = wiki_article_list
+        ingest_fn = ingest_wiki_file
+        label = f"wiki ({len(source_files)} articles)"
+    else:
+        source_files = sorted(MARKDOWN_DIR.glob("*.md"))
+        ingest_fn = ingest_file
+        label = f"markdown ({len(source_files)} files)"
+
+    if not source_files:
+        print(f"No source files found (checked {label}).")
         sys.exit(1)
 
-    print(f"{'Re-indexing' if args.rebuild else 'Indexing'} {len(md_files)} files...")
+    action = "Re-indexing" if args.rebuild else "Indexing"
+    print(f"{action} from {label}...")
     total, skipped = 0, 0
-    for md_file in md_files:
-        n = ingest_file(md_file, collection, rebuild=args.rebuild)
+    for src_file in source_files:
+        n = ingest_fn(src_file, collection, rebuild=args.rebuild)
         if n == -1:
             skipped += 1
         else:
             total += n
-            print(f"  {md_file.name}: {n} chunks")
+            rel = src_file.relative_to(WIKI_DIR) if use_wiki else src_file.name
+            print(f"  {rel}: {n} chunks")
 
     print(f"\nDone. {total} chunks indexed, {skipped} files skipped.")
 

@@ -109,7 +109,8 @@ def load_document_context(doc_path: str, pages: str = None, max_words: int = 400
 _SEMANTIC_KEYWORDS = [
     "tell me about", "what is", "what are", "describe", "explain",
     "how does", "how do", "how are", "how is", "why ", "background on",
-    "overview of", "history of", "summarize", "summary of",
+    "overview of", "history of", "summarize", "summary of", "summary on",
+    "give me a summary", "summary",
 ]
 _CAPACITY_KEYWORDS = [
     "which countries", "wet storage", "dry storage", "storage capacity",
