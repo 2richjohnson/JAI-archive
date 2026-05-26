@@ -17,9 +17,9 @@
 - `doc_family` metadata enables clean `where` filtering without regex prefix-scanning
 - `--rebuild` flag wipes and rebuilds; `--file X.md` re-indexes one file; normal run skips existing
 
-**Trade-off**: Re-ingestion required (~15–20 min with nomic-embed-text on GPU0). Chunk count will increase (more sections = more chunks than the old 300-word cuts for short sections). This is fine — each chunk is now more meaningful.
+**Trade-off**: Re-ingestion required (~15–20 min with nomic-embed-text on GPU0). Chunk count increased from 1,367 → 6,314 (more sections, each more meaningful than old 300-word cuts).
 
-**After rebuild**: Update `_source_where_filter` in `07_query.py` to use `doc_family` metadata directly instead of filename prefix-scanning all collection metadata.
+**Rebuild completed 2026-05-26**: 6,314 chunks indexed. `_source_where_filter` updated to use `doc_family`/`doc_id` metadata directly. Both content queries and doc-name queries confirmed improved.
 
 ---
 

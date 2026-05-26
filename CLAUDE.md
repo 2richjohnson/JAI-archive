@@ -16,7 +16,7 @@ natural language questions over a document set that is heavily tabular.
   - `~/projects/JAI-archive/` (canonical)
   - `~/jai-archive/` (user runs scripts from here)
 - **Local dev machine** (`/home/bbbb/projects/JAI-archive/`): scripts + git only — no markdown/parquet data here
-- **ChromaDB**: `~/jai-archive/db/` — collection `jai_archive`, 1367 documents (170/177 markdown files; 7 excluded as junk — MS Office temp files and image-only pages)
+- **ChromaDB**: `~/jai-archive/db/` — collection `jai_archive`, **6,314 chunks** from 177 markdown files (heading-aware chunking as of 2026-05-26; metadata: doc_id, doc_family, title, section)
 - **Markdown source**: `~/jai-archive/markdown/` (177 files)
 - **DuckDB**: `~/jai-archive/duckdb/jai.db`
 - **Canonical attribute registry**: `~/jai-archive/attribute_registry.json` (also in projects/)
@@ -120,6 +120,7 @@ NeatDesk scanner
 
 Scripts:
 - `ingest.sh` — runs all 4 steps in sequence, every step resumable
+- `03_ingest.py` — ChromaDB indexer (heading-aware; `--rebuild` to wipe+reindex, `--file X.md` for one file)
 - `05_extract_tables.py` — LLM 2-pass extraction (llama3.1:8b)
 - `06_setup_duckdb.py` — builds DuckDB views from all parquet
 - `07_query.py` — hybrid NL query (DuckDB + ChromaDB)
@@ -223,11 +224,12 @@ which invokes ChromaDB's default 384-dim embedder and silently returns empty res
 - **NULL units in capacity rows**: Some extracted capacity values have `unit IS NULL` despite being MTU; likely a prompting gap in 05_extract_tables.py
 - **Data quality**: All known issues above become less severe with 70B model (see AWS plan below)
 
-## Query System Status (as of 2026-05-25)
+## Query System Status (as of 2026-05-26)
 - **Operational** — no pending fixes
-- **All routing paths validated** (as of 2026-05-23): semantic ✅, structured ✅, hybrid ✅
-- **New features** (as of 2026-05-25): `--doc`, `--doc2`, `--pages`, `--deep`, `--model` flags
-- ChromaDB current: 170/177 files indexed; 7 excluded (junk — no action needed)
+- **All routing paths validated**: semantic ✅, structured ✅, hybrid ✅
+- **Flags**: `--doc`, `--doc2`, `--pages`, `--deep`, `--model`, `--verbose`, `--interactive`
+- **Doc-ID queries**: naming a JAI document (e.g. "JAI-N006" or "JAI-N006a") triggers metadata filtering + auto-inject of matching markdown files
+- ChromaDB: 6,314 heading-aware chunks from 177 files; rebuild with `python 03_ingest.py --rebuild`
 
 ## Extraction Progress (as of 2026-05-21)
 - Extraction **completed** 2026-05-20 after two crash/resume cycles

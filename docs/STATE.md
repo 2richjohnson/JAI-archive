@@ -61,30 +61,33 @@
 
 ---
 
-## Last Session Summary (2026-05-25 continued)
+## Last Session Summary (2026-05-26)
 
 ### What We Accomplished
-- **Diagnosed thin query results**: synthesis was truncating semantic text at 3,000 chars; raised to 8,000 chars and `num_ctx` from 4,096 → 12,288 (no-inject) / 16,384 (with inject).
+- **GPU1 experiment concluded**: `NUM_PARALLEL=1` with `qwen2.5:14b` crashed Ollama — GPU1 hit 100%, GPU0 barely loaded. Hardware confirmed unreliable. Permanent fix applied: `CUDA_VISIBLE_DEVICES=0` in Ollama override; models reverted to `llama3.1:8b` / `qwen2.5-coder:7b`.
+- **Diagnosed thin query results**: synthesis was truncating semantic text at 3,000 chars, discarding most retrieved chunks. Raised to 8,000 chars; `num_ctx` 4,096 → 12,288 (no-inject) / 16,384 (with inject).
 - **Rewrote `03_ingest.py`** with heading-aware chunking:
-  - Splits by `##` sections instead of blind 300-word cuts
+  - Splits by `##` sections instead of blind 300-word word-count cuts
   - Prepends `[doc_id] title\n## section\n` to every chunk — LLM always has structural context
-  - Adds `doc_id`, `doc_family`, `title`, `section` metadata fields to every chunk
-  - `--rebuild` flag wipes and rebuilds the collection; `--file X.md` re-indexes one file
-- **Kicked off full ChromaDB rebuild** (`python 03_ingest.py --rebuild`) — running in background on VM, log at `~/jai-archive/logs/ingest_rebuild.log`
-- **Added `_source_where_filter`** to `07_query.py`: uses ChromaDB `where` metadata filter when query names a JAI document ID; falls back to content filter for cask/vendor queries.
-- **Fixed `_DOC_ID_RE`** regex to match IDs with trailing letter (JAI-N006a).
-- **Added auto-inject** in `ask()`: when a JAI doc ID is detected and matching markdown files exist, auto-inject them (scales word budget across files).
+  - Stores `doc_id`, `doc_family`, `title`, `section` metadata on every chunk
+  - `--rebuild` flag wipes and rebuilds; `--file X.md` re-indexes one file
+- **Full ChromaDB rebuild completed**: 6,314 chunks from 177 markdown files
+- **Updated `07_query.py`**:
+  - `_source_where_filter`: uses `doc_family`/`doc_id` metadata for clean ChromaDB `where` filtering when query names a JAI document — no more filename prefix-scanning
+  - Fixed `_DOC_ID_RE` regex to match IDs with trailing letter (e.g. JAI-N006a)
+  - Auto-inject matching markdown files when doc ID detected and `--doc` not specified
+- **Tested**: content queries (shootaring canyon) and doc-name queries (JAI-N006 family) both significantly improved. Committed `9cab54c` and pushed.
 
-### What's Pending
-- Nothing blocking. Query system operational with improved ingestion.
+### What's Broken or Incomplete
+- Nothing blocking. Query system operational.
 
 ### Immediate Next Steps
-1. **Data quality triage** — fix HTML entity / junk-entity issues, or defer to AWS 70B run
+1. **Data quality triage** — decide: fix HTML entity / junk-entity / NULL unit issues now, or defer entirely to the AWS 70B run
 2. **AWS scaling** — g5.12xlarge spot, llama3.1:70B Q4_K_M, `--workers 4`, rebuild DuckDB, tear down
 
 ## Current Focus
 
-1. **Data quality triage** — fix HTML entity / junk-entity issues, or defer to AWS 70B run
+1. **Data quality triage** — defer to AWS 70B run, or fix select issues now
 2. **AWS scaling** — g5.12xlarge spot, llama3.1:70B Q4_K_M, `--workers 4`, rebuild DuckDB, tear down
 
 ---
