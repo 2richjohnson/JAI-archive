@@ -58,7 +58,10 @@ def setup_database(rebuild: bool = False):
     con.execute(f"""
         CREATE OR REPLACE VIEW facts AS
         SELECT
-            CAST(entity          AS VARCHAR) AS entity,
+            -- Decode HTML numeric entities left by LLM extraction (&#124; → |)
+            REGEXP_REPLACE(
+                REGEXP_REPLACE(CAST(entity AS VARCHAR), '&#124;', '|', 'g'),
+                '&#38;', '&', 'g')         AS entity,
             CAST(entity_type     AS VARCHAR) AS entity_type,
             CAST(row_label       AS VARCHAR) AS row_label,
             CAST(attribute       AS VARCHAR) AS attribute,
@@ -94,7 +97,27 @@ def setup_database(rebuild: bool = False):
             entity                           AS country,
             attribute,
             MAX(value_numeric)               AS value_numeric,
-            ANY_VALUE(unit)                  AS unit,
+            -- Fill NULL units for well-known capacity attributes
+            COALESCE(ANY_VALUE(unit), CASE attribute
+                WHEN 'wet_storage_mtu'           THEN 'MTU'
+                WHEN 'dry_storage_mtu'           THEN 'MTU'
+                WHEN 'total_storage_mtu'         THEN 'MTU'
+                WHEN 'wet_storage_pwr_mtu'       THEN 'MTU'
+                WHEN 'wet_storage_candu_mtu'     THEN 'MTU'
+                WHEN 'current_inventory_mtu'     THEN 'MTU'
+                WHEN 'stored_fuel_mtu'           THEN 'MTU'
+                WHEN 'design_capacity_mtu'       THEN 'MTU'
+                WHEN 'current_inventory_mthm'    THEN 'MTHM'
+                WHEN 'nominal_pond_capacity_mthm' THEN 'MTHM'
+                WHEN 'design_capacity_mthm'      THEN 'MTHM'
+                WHEN 'capacity_mthm'             THEN 'MTHM'
+                WHEN 'expected_fuel_40yr_mthm'   THEN 'MTHM'
+                WHEN 'committed_reprocessing_mthm' THEN 'MTHM'
+                WHEN 'direct_disposal_mthm'      THEN 'MTHM'
+                WHEN 'year_of_saturation'        THEN 'year'
+                WHEN 'percent_occupied'          THEN '%'
+                WHEN 'net_capacity_mw'           THEN 'MW'
+            END)                             AS unit,
             COUNT(DISTINCT _source_doc)      AS source_docs,
             MAX(_confidence)                 AS best_confidence
         FROM facts
@@ -128,6 +151,14 @@ def setup_database(rebuild: bool = False):
         FROM facts
         WHERE entity_type = 'cask_model'
           AND entity IS NOT NULL
+          AND TRY_CAST(entity AS DOUBLE) IS NULL  -- remove pure numbers ("186", "0.764", "6.")
+          AND LENGTH(entity) > 3                   -- remove single-char list items ("c.", "j.")
+          AND entity NOT LIKE '%(%'               -- remove column headers ("Max Burnup (GWD/MTU)")
+          AND entity NOT LIKE '/%'               -- remove path-like junk ("/G27/G18/...")
+          -- remove comma-formatted numbers ("108,267"), quantity+type ("24 PWR"), scientific notation ("1.0 x 10 -7")
+          AND NOT regexp_matches(entity, '^\d[\d.]*[, ]')
+          -- remove numbered list items ("5. Thermal", "11. Cavity Atmosphere")
+          AND NOT regexp_matches(entity, '^\d+\. ')
         GROUP BY entity, attribute
         ORDER BY entity, attribute
     """)
@@ -179,7 +210,7 @@ def print_info():
         print()
         print("── Top capacity attributes ──────────────────────────")
         rows = con.execute("""
-            SELECT attribute, COUNT(*) AS n, COUNT(DISTINCT entity) AS entities
+            SELECT attribute, COUNT(*) AS n, COUNT(DISTINCT country) AS entities
             FROM capacity_summary GROUP BY attribute ORDER BY n DESC LIMIT 10
         """).fetchall()
         for r in rows:
