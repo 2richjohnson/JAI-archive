@@ -2,6 +2,28 @@
 
 ---
 
+## 2026-05-26: Wiki generation layer (02b_generate_wiki.py)
+
+**Decision**: Add a wiki generation step between `02_convert.py` and `03_ingest.py`. LLM reads source markdown and generates structured entity-based wiki articles (countries, casks, vendors, facilities, regulatory items, topics) to `~/jai-archive/wiki/`. ChromaDB is rebuilt from wiki articles instead of raw markdown chunks.
+
+**Context**: Raw chunk retrieval was inconsistent for structured/tabular content. The UK query "give me a summary on spent nuclear fuel storage in the United Kingdom" returned no relevant results because: (1) "summary on" wasn't in `_SEMANTIC_KEYWORDS`, (2) topic-heavy chunks from other countries outranked the UK article by cosine similarity (0.143 Taiwan vs 0.233 UK).
+
+**What the wiki layer provides**:
+- Consistent article structure regardless of source document quality or OCR artifacts
+- Entity-based retrieval: query "UK storage" hits one UK article, not scattered chunks
+- Compounding knowledge: new documents enrich existing articles (merge logic)
+- Survey documents (JAI-490) generate one article per entity, not one blob
+
+**Entity filter in 07_query.py**: Added `_wiki_entity_filter()` that loads known entity names from `wiki/` at startup and applies `where={"entity_name": ...}` ChromaDB metadata filter when the query names a known entity. Priority: JAI doc-ID filter > wiki entity filter > content keyword filter.
+
+**Classification fix**: Initial classification used only first 500 words — missed countries deep in survey documents. Fixed by also extracting all `##` headings from full document, giving LLM a structural map without needing to process thousands of words.
+
+**Trade-off**: Wiki generation is slow (~2 min/file on llama3.1:8b). Full 177-file run takes ~6 hours. Resumable via `processed_docs.json` registry. ChromaDB must be rebuilt after generation. Articles are 8B quality — will improve significantly in future AWS 70B run.
+
+**Do not rebuild ChromaDB from markdown/** once wiki articles exist — `03_ingest.py` auto-detects wiki/ and uses it as source.
+
+---
+
 ## 2026-05-25: Heading-aware ChromaDB ingestion (03_ingest.py rewrite)
 
 **Decision**: Rewrite `03_ingest.py` to chunk by `##` heading sections instead of blind 300-word word-count cuts. Prepend `[doc_id] title\n## section\n` to every chunk. Add `doc_id`, `doc_family`, `title`, `section` metadata to every chunk.

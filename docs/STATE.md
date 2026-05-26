@@ -107,10 +107,41 @@
 2. **Pipeline for new documents** — wire `03_ingest.py` into `ingest.sh` so new docs get ChromaDB-indexed automatically
 3. **Continue query testing** — exercise more query types and document edge cases
 
+---
+
+## Last Session Summary (2026-05-26 continued — wiki layer)
+
+### What We Accomplished
+- **Implemented wiki generation layer** (`02b_generate_wiki.py`) — new pipeline step between `02_convert.py` and `03_ingest.py`:
+  - Classifies each markdown file by entity type (CASK/COUNTRY/VENDOR/REGULATORY/FACILITY/TOPIC)
+  - Generates structured wiki articles per entity to `~/jai-archive/wiki/{casks,countries,vendors,...}/`
+  - Survey documents (JAI-490) generate multiple articles — one per country/entity detected
+  - Merge logic: new documents enrich existing articles without overwriting
+  - Registry (`wiki/processed_docs.json`) for resumability
+  - CLI: `--doc`, `--force`, `--index-only`, `--validate`, `--stats`
+- **Fixed classification for long survey documents**: initial run missed UK, Korea, Sweden etc. because classification only used first 500 words. Fixed by extracting all `##` headings from full document and passing those alongside the 500-word excerpt.
+- **Fixed entity retrieval in `07_query.py`**: UK article ranked 29th by cosine similarity even though it existed — topic-heavy chunks from other countries outscored it. Added `_wiki_entity_filter()` that loads known entity names from `wiki/` at startup and applies `where={"entity_name": ...}` ChromaDB metadata filter when the query names a known entity. UK query now returns all 13 UK chunks exclusively.
+- **Fixed `_SEMANTIC_KEYWORDS`**: added `"summary on"`, `"give me a summary"`, and bare `"summary"` — "give me a summary on X" now routes to SEMANTIC correctly.
+- **Updated `03_ingest.py`**: auto-detects wiki/ vs markdown/ source; wiki articles get enhanced metadata (`entity_type`, `entity_name`, `source_documents`, `article_section`); `--source wiki/markdown/auto` flag.
+- **Updated `ingest.sh`**: now 6-step pipeline; wiki generation (step 3) and ChromaDB rebuild (step 6) wired in.
+- **Tested JAI-490.md**: generated 24 articles (13 countries, 5 facilities, 3 regulatory, 3 vendors) from one survey document. UK query now returns accurate answer.
+- **Full corpus wiki generation running** in tmux on VM — 177 markdown files, ~5-6 hours total. Started 2026-05-26 18:30.
+
+### What's Broken or Incomplete
+- Wiki generation still running (~157 files remaining as of 19:12).
+- After wiki run completes: need to rebuild ChromaDB (`python 03_ingest.py --rebuild`) to pick up all new articles.
+- Duplicate log lines in `wiki_generation.log` — stdout also redirected to log file in tmux command. Cosmetic only, no functional impact.
+
+### Immediate Next Steps (after wiki run completes)
+1. `python 03_ingest.py --rebuild` — rebuild ChromaDB from all wiki articles
+2. Test queries across multiple entity types (casks, countries, vendors)
+3. `python 02b_generate_wiki.py --validate` — check for broken wikilinks
+4. `python 02b_generate_wiki.py --stats` — review article counts by category
+
 ## Current Focus
 
-1. Query system improvement and testing
-2. Keeping pipeline smooth for new document ingestion as scanning continues
+1. Wiki generation running on full corpus (background, VM tmux session `wiki`)
+2. After completion: ChromaDB rebuild, then query testing across entity types
 
 ---
 
@@ -120,11 +151,10 @@
 
 ## Blockers
 
-- None. VM stable, GPU0-only Ollama running, query system and DuckDB operational.
+- None. Wiki generation running unattended in tmux.
 
 ## Known Debt
 
-- Some borderline junk cask_model entities remain (section headers misclassified) — tolerable at 8B, clean in future 70B run
-- `ingest.sh` does not yet call `03_ingest.py` — must run ChromaDB re-index manually after new docs added
-- `_SEMANTIC_KEYWORDS` too narrow — "summary on" not matched, only "summary of"; bare "summary" should be added
-- UK/United Kingdom entity name mismatch — SQL queries may fail depending on how data was extracted; needs `--verbose` diagnosis
+- Some borderline junk cask_model entities in DuckDB remain (section headers misclassified) — tolerable at 8B, clean in future 70B run
+- Duplicate log lines in `wiki_generation.log` (cosmetic — stdout + FileHandler both writing to log)
+- Wiki articles only cover entities found in the first classification pass — some entities in very long documents may be missed if not in headings (unlikely now that heading scan is implemented)

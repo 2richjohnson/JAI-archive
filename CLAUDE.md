@@ -103,24 +103,28 @@ python 05_extract_tables.py --workers 1
 **Do NOT use `--hosts` flag** — activates dual-Ollama mode, caused crashes.
 **Use `--workers 1`** (not 2) — GPU1 is now disabled; two concurrent requests no longer benefit from parallelism and may queue unnecessarily.
 
-## Current Pipeline (EAV Architecture)
+## Current Pipeline (EAV Architecture + Wiki Layer)
 ```
 NeatDesk scanner
   └── raw/          ← drop new PDFs here
-        └── 01_ocr.sh          — ocrmypdf: add searchable text layer (skips existing)
+        └── 01_ocr.sh              — ocrmypdf: add searchable text layer (skips existing)
               └── ocr/
-                    └── 02_convert.py      — docling: PDF → markdown (skips existing)
+                    └── 02_convert.py          — docling: PDF → markdown (skips existing)
                           └── markdown/
-                                └── 05_extract_tables.py  — LLM: tables → EAV Parquet
-                                      └── tables/parquet/
-                                            └── 06_setup_duckdb.py  — Parquet → DuckDB
-                                                  └── duckdb/jai.db
-                                                        └── 07_query.py  — NL query interface
+                                └── 02b_generate_wiki.py  — LLM: markdown → wiki articles  ← NEW
+                                      └── wiki/{casks,countries,...}/
+                                            └── 03_ingest.py  — ChromaDB indexer (uses wiki/ if present)
+                                            └── 05_extract_tables.py  — LLM: tables → EAV Parquet
+                                                  └── tables/parquet/
+                                                        └── 06_setup_duckdb.py  — Parquet → DuckDB
+                                                              └── duckdb/jai.db
+                                                                    └── 07_query.py  — NL query interface
 ```
 
 Scripts:
-- `ingest.sh` — runs all 4 steps in sequence, every step resumable
-- `03_ingest.py` — ChromaDB indexer (heading-aware; `--rebuild` to wipe+reindex, `--file X.md` for one file)
+- `ingest.sh` — runs all 6 steps in sequence, every step resumable
+- `02b_generate_wiki.py` — wiki generator (LLM classifies + generates entity articles; `--doc X.md`, `--force`, `--index-only`, `--validate`, `--stats`)
+- `03_ingest.py` — ChromaDB indexer; auto-detects wiki/ vs markdown/ source; `--source wiki/markdown/auto`, `--rebuild`, `--file X.md`
 - `05_extract_tables.py` — LLM 2-pass extraction (llama3.1:8b)
 - `06_setup_duckdb.py` — builds DuckDB views from all parquet
 - `07_query.py` — hybrid NL query (DuckDB + ChromaDB)
@@ -142,6 +146,13 @@ Individual steps if needed:
 source ~/jai-rag/bin/activate
 bash 01_ocr.sh                                # raw/ → ocr/
 python 02_convert.py                          # ocr/ → markdown/
+python 02b_generate_wiki.py                   # markdown/ → wiki/ (skips already-processed)
+python 02b_generate_wiki.py --doc X.md        # single file
+python 02b_generate_wiki.py --force           # regenerate all articles
+python 02b_generate_wiki.py --stats           # article count by category
+python 02b_generate_wiki.py --validate        # check broken wikilinks
+python 03_ingest.py --rebuild                 # wiki/ → ChromaDB (auto-detects source)
+python 03_ingest.py --source markdown --rebuild  # force markdown mode (bypass wiki)
 python 05_extract_tables.py --workers 2       # markdown/ → parquet/
 python 05_extract_tables.py --workers 1       # single worker (safer)
 python 05_extract_tables.py --file X.md       # single file test
@@ -225,11 +236,13 @@ which invokes ChromaDB's default 384-dim embedder and silently returns empty res
 - **Data quality**: All known issues above become less severe with 70B model (see AWS plan below)
 
 ## Query System Status (as of 2026-05-26)
-- **Operational** — no pending fixes
+- **Operational** — wiki generation in progress on full corpus
 - **All routing paths validated**: semantic ✅, structured ✅, hybrid ✅
 - **Flags**: `--doc`, `--doc2`, `--pages`, `--deep`, `--model`, `--verbose`, `--interactive`
-- **Doc-ID queries**: naming a JAI document (e.g. "JAI-N006" or "JAI-N006a") triggers metadata filtering + auto-inject of matching markdown files
-- ChromaDB: 6,314 heading-aware chunks from 177 files; rebuild with `python 03_ingest.py --rebuild`
+- **Doc-ID queries**: naming a JAI document (e.g. "JAI-N006") triggers metadata filtering + auto-inject of matching markdown files
+- **Wiki entity queries**: naming a known entity (e.g. "United Kingdom", "TN-40") triggers `entity_name` metadata filter — returns that entity's article chunks exclusively
+- ChromaDB: currently 264 chunks from 24 wiki articles (JAI-490 only); will be rebuilt from full wiki after generation completes
+- Wiki articles in `~/jai-archive/wiki/` — rebuild ChromaDB after generation: `python 03_ingest.py --rebuild`
 
 ## Extraction Progress (as of 2026-05-21)
 - Extraction **completed** 2026-05-20 after two crash/resume cycles
