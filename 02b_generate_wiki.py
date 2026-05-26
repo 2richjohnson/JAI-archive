@@ -316,8 +316,12 @@ _CLASSIFICATION_PROMPT = """\
 Analyze this nuclear industry document and identify all significant entities it describes.
 
 Document filename: {filename}
-Document excerpt (first ~500 words):
+
+Document opening (~300 words):
 {excerpt}
+
+Document section headings (full list):
+{headings}
 
 Entity type definitions:
 - CASK: a specific storage/transport cask or canister model (e.g. TN-40, HI-STORM 100)
@@ -500,15 +504,30 @@ def _classify_from_filename(filename: str) -> dict:
     }
 
 
+def _extract_headings(text: str, max_headings: int = 60) -> str:
+    """Extract ## headings from document to give LLM a full structural overview."""
+    headings = re.findall(r'^#{1,3}[^\n]+', text, re.MULTILINE)
+    # Filter out pure table-header lines (all caps + spaces, no letters > 1 word)
+    meaningful = [h for h in headings if len(re.sub(r'[^a-zA-Z]', '', h)) > 3]
+    return "\n".join(meaningful[:max_headings]) if meaningful else "(no headings found)"
+
+
 def classify_document(md_file: Path) -> dict:
     """
     Use LLM to classify document entity type and enumerate all significant entities.
+    Uses opening excerpt + full heading list so survey documents covering many
+    countries/casks all get detected regardless of document length.
     Falls back to filename-based classification if LLM output cannot be parsed.
     """
     text = md_file.read_text()
-    excerpt = " ".join(text.split()[:500])
+    excerpt = " ".join(text.split()[:300])
+    headings = _extract_headings(text)
 
-    prompt = _CLASSIFICATION_PROMPT.format(filename=md_file.name, excerpt=excerpt)
+    prompt = _CLASSIFICATION_PROMPT.format(
+        filename=md_file.name,
+        excerpt=excerpt,
+        headings=headings,
+    )
     response = _llm(prompt, num_ctx=4096)
 
     # Try progressively looser JSON extraction patterns

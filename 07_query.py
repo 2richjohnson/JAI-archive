@@ -291,6 +291,46 @@ def _find_matching_docs(prefix: str) -> list[Path]:
     return sorted(p for p in md_dir.glob("*.md") if p.name.upper().startswith(prefix.upper()))
 
 
+# ── Wiki entity filter ─────────────────────────────────────────────────────────
+_WIKI_ENTITIES: dict[str, str] | None = None  # {name_lower: canonical_name}
+
+def _load_wiki_entities() -> dict[str, str]:
+    """
+    Load entity names from the wiki directory on first call.
+    Returns a dict mapping lowercase entity name → canonical name as stored in metadata.
+    """
+    global _WIKI_ENTITIES
+    if _WIKI_ENTITIES is not None:
+        return _WIKI_ENTITIES
+    entities: dict[str, str] = {}
+    wiki_dir = BASE_DIR / "wiki"
+    for subdir in ("casks", "countries", "vendors", "regulatory", "facilities", "topics"):
+        d = wiki_dir / subdir
+        if d.exists():
+            for article in d.glob("*.md"):
+                canonical = article.stem.replace("_", " ")
+                entities[canonical.lower()] = canonical
+    _WIKI_ENTITIES = entities
+    return entities
+
+
+def _wiki_entity_filter(question: str) -> dict | None:
+    """
+    If the query names a wiki entity, return a ChromaDB `where` metadata filter
+    so results come from that entity's article. Matches longest name first to
+    avoid "France" matching inside "French".
+    """
+    entities = _load_wiki_entities()
+    if not entities:
+        return None
+    q_lower = question.lower()
+    # Sort by name length descending so longer matches win
+    for name_lower in sorted(entities, key=len, reverse=True):
+        if name_lower in q_lower:
+            return {"entity_name": {"$eq": entities[name_lower]}}
+    return None
+
+
 EMBED_MODEL = "nomic-embed-text"
 
 
@@ -317,8 +357,7 @@ def semantic_search(question: str, force_filter: dict | None = None,
 
     kwargs = {"query_embeddings": [embedding], "n_results": TOP_K}
 
-    # Doc ID filter (metadata) takes precedence over content filter.
-    # Use more results when scoped to a specific document family.
+    # Priority 1: JAI doc-ID filter (e.g. query mentions "JAI-N006")
     source_filter = _source_where_filter(question)
     if source_filter:
         kwargs["where"] = source_filter
@@ -326,9 +365,18 @@ def semantic_search(question: str, force_filter: dict | None = None,
         if verbose:
             print(f"[semantic] doc-id filter → {source_filter}")
     else:
-        doc_filter = force_filter or _doc_filter(question)
-        if doc_filter:
-            kwargs["where_document"] = doc_filter
+        # Priority 2: wiki entity filter (e.g. query mentions "United Kingdom")
+        entity_filter = _wiki_entity_filter(question)
+        if entity_filter:
+            kwargs["where"] = entity_filter
+            kwargs["n_results"] = TOP_K * 3
+            if verbose:
+                print(f"[semantic] entity filter → {entity_filter}")
+        else:
+            # Priority 3: content keyword filter (cask model / vendor names)
+            doc_filter = force_filter or _doc_filter(question)
+            if doc_filter:
+                kwargs["where_document"] = doc_filter
 
     try:
         results = col.query(**kwargs)
