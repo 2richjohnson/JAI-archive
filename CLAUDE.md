@@ -10,6 +10,7 @@ natural language questions over a document set that is heavily tabular.
 - **GPU**: NVIDIA GTX 1070 × 2 (16GB VRAM total) — both cards visible to primary Ollama
 - **Models**: `llama3.1:8b` (routing + synthesis + **extraction**), `qwen2.5-coder:7b` (SQL generation),
   `nomic-embed-text` (embeddings)
+- **WARNING**: `qwen2.5:14b` was briefly set as default in `07_query.py` on 2026-05-25 and caused a hard VM crash (spread across both GPUs → VRAM contention). Safe models are 8b-class only on this VM. See DECISIONS.md.
 - **Python**: 3.14, venv at `~/jai-rag/` on BOTH local and remote
 - **Scripts live in two places on remote** — always sync both:
   - `~/projects/JAI-archive/` (canonical)
@@ -62,31 +63,45 @@ Two systemd services exist. **Only the primary should be used and enabled.**
 ### Primary (USE THIS)
 - Service: `ollama.service`, port **11434**
 - Config override: `/etc/systemd/system/ollama.service.d/override.conf`
-  - `OLLAMA_NUM_PARALLEL=2` — handles 2 concurrent requests
-  - `OLLAMA_MAX_LOADED_MODELS=2`
-- Sees **both GPUs** (CUDA0 + CUDA1), 16GB VRAM total
-- Reports combined VRAM: `vram-based default context total_vram="16.0 GiB"`
+
+**Current config (permanent as of 2026-05-25):**
+```
+[Service]
+Environment="OLLAMA_NUM_PARALLEL=1"
+Environment="OLLAMA_MAX_LOADED_MODELS=1"
+Environment="CUDA_VISIBLE_DEVICES=0"
+```
+
+- `CUDA_VISIBLE_DEVICES=0`: GPU1 permanently excluded — hardware unreliable under sustained load
+- `OLLAMA_NUM_PARALLEL=1`: no concurrent requests; single inference at a time
+- GPU0 only (~8 GiB usable VRAM) — safe for `llama3.1:8b` + `nomic-embed-text`
+- **Do not revert** `CUDA_VISIBLE_DEVICES=0`. Do not attempt 14B+ models on this VM.
+
+**Current status**: Stable. Ollama running on GPU0 only. Query system operational.
 
 ### Secondary (DISABLED — DO NOT RE-ENABLE)
 - Service: `ollama-gpu1.service`, port **11435**
 - Config: `CUDA_VISIBLE_DEVICES=1`, `OLLAMA_HOST=0.0.0.0:11435`
 - **Disabled 2026-05-20** after causing two consecutive VM hard crashes
-- **Crash mechanism**: Primary Ollama uses GPU1 as part of its multi-GPU spread (~4.3 GiB on each card). When gpu1 service also loads llama3.1:8b (4.58 GiB) onto the same GPU1, combined VRAM demand exceeds 8 GiB → immediate hard VM reset, no OOM warning, no clean shutdown. Happened on original crash AND on the subsequent reboot (both services auto-start on boot → crash loop).
+- **Crash mechanism**: Primary Ollama uses GPU1 as part of its multi-GPU spread. When gpu1 service also loads onto GPU1, combined VRAM exceeds 8 GiB → immediate hard VM reset, no OOM warning. Crash loop on reboot.
 - If it somehow gets re-enabled: `echo "$(cat ~/.ssh_pass)" | sudo -S systemctl disable --now ollama-gpu1.service`
+
+### GPU1 — PERMANENTLY EXCLUDED FROM OLLAMA
+- **2026-05-25**: Second crash caused by `qwen2.5:14b` spreading across both GPUs from the *primary* service (no secondary service running). All VMs on the Proxmox host went down; Proxmox survived.
+- **Fix**: Add `Environment="CUDA_VISIBLE_DEVICES=0"` to primary service override → GPU1 invisible to Ollama entirely.
+- GPU1 is unreliable under any high-VRAM load. Do not attempt to re-include it without diagnosing the hardware.
 
 ### Safe Extraction Command
 ```bash
 # On the VM, from ~/jai-archive/, with venv active:
 source ~/jai-rag/bin/activate
-nohup python 05_extract_tables.py --workers 2 > logs/extraction_run.log 2>&1 &
+nohup python 05_extract_tables.py --workers 1 > logs/extraction_run.log 2>&1 &
 # OR in a tmux session:
 tmux new -s extract
-python 05_extract_tables.py --workers 2
+python 05_extract_tables.py --workers 1
 ```
-**Do NOT use `--hosts` flag** — activates dual-Ollama mode, which caused the crashes above.
-
-The single Ollama with NUM_PARALLEL=2 handles both GPUs internally. `--workers 2` sends two
-concurrent requests to the same Ollama endpoint; it queues/parallelizes them across both cards.
+**Do NOT use `--hosts` flag** — activates dual-Ollama mode, caused crashes.
+**Use `--workers 1`** (not 2) — GPU1 is now disabled; two concurrent requests no longer benefit from parallelism and may queue unnecessarily.
 
 ## Current Pipeline (EAV Architecture)
 ```
@@ -131,10 +146,21 @@ python 05_extract_tables.py --workers 1       # single worker (safer)
 python 05_extract_tables.py --file X.md       # single file test
 python 06_setup_duckdb.py --rebuild           # parquet/ → DuckDB
 
-# Query
+# Query (basic)
 python 07_query.py "question"
 python 07_query.py --interactive
-python 07_query.py --verbose "question"       # shows routing + SQL
+python 07_query.py --verbose "question"           # shows routing + SQL
+
+# Query with document injection (bypasses ChromaDB retrieval for that doc)
+python 07_query.py --doc ~/jai-archive/markdown/JAI-490.md "question"
+python 07_query.py --doc ~/jai-archive/ocr/JAI-490.pdf --pages 89-95 "question"
+python 07_query.py --doc ... --doc2 ... "question"
+
+# Two-stage deep dive (ChromaDB → identify top doc → re-query with full doc)
+python 07_query.py --deep "question"
+
+# Override model for one session (default is llama3.1:8b — do NOT use 14b on this VM)
+python 07_query.py --model llama3.1:8b "question"
 
 # Export cost studies to Excel
 python 08_export_excel.py
@@ -197,10 +223,11 @@ which invokes ChromaDB's default 384-dim embedder and silently returns empty res
 - **NULL units in capacity rows**: Some extracted capacity values have `unit IS NULL` despite being MTU; likely a prompting gap in 05_extract_tables.py
 - **Data quality**: All known issues above become less severe with 70B model (see AWS plan below)
 
-## Query System Status (as of 2026-05-23)
-- **Validated end-to-end** with real questions: semantic, structured, and hybrid paths all working
-- All three routing paths tested: rotary dissolvers (semantic ✅), wet storage capacity (structured ✅), transnuclear cask assemblies (hybrid ✅)
-- ChromaDB current: 170/177 files indexed; 7 excluded (junk)
+## Query System Status (as of 2026-05-25)
+- **Operational** — no pending fixes
+- **All routing paths validated** (as of 2026-05-23): semantic ✅, structured ✅, hybrid ✅
+- **New features** (as of 2026-05-25): `--doc`, `--doc2`, `--pages`, `--deep`, `--model` flags
+- ChromaDB current: 170/177 files indexed; 7 excluded (junk — no action needed)
 
 ## Extraction Progress (as of 2026-05-21)
 - Extraction **completed** 2026-05-20 after two crash/resume cycles

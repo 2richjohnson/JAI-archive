@@ -10,6 +10,24 @@
 
 ---
 
+## Last Session Summary (2026-05-25)
+
+### What We Accomplished
+- **Implemented document injection feature in `07_query.py`**: `--doc`, `--doc2`, `--pages`, `--deep`, `--model` CLI flags; `load_document_context()`, `parse_page_range()`, `two_stage_query()` — all implemented per spec.
+- Feature adds: inject full markdown or PDF pages into query context, two-stage deep dive (ChromaDB retrieval → full document analysis), per-invocation model override.
+- **GPU1 experiment concluded** — `NUM_PARALLEL=1` with qwen2.5:14b crashed Ollama (GPU1 hit 100%, GPU0 barely loaded). Hardware confirmed unreliable under any sustained load.
+- **Permanent GPU1 fix applied**: `CUDA_VISIBLE_DEVICES=0` added to Ollama override; Ollama restarted. GPU1 invisible to Ollama permanently.
+- **`07_query.py` reverted**: `LLM_MODEL` → `llama3.1:8b`, `SQL_MODEL` → `qwen2.5-coder:7b`. Synced to both VM locations.
+
+### What's Broken / Pending
+- Nothing blocking. System is operational.
+
+### Immediate Next Steps
+1. **Data quality triage** — fix HTML entity / junk-entity issues now, or defer to AWS 70B run
+2. **AWS scaling** — g5.12xlarge spot, llama3.1:70B Q4_K_M, `--workers 4`, rebuild DuckDB, tear down
+
+---
+
 ## Last Session Summary (2026-05-24)
 
 ### What We Accomplished
@@ -43,12 +61,31 @@
 
 ---
 
+## Last Session Summary (2026-05-25 continued)
+
+### What We Accomplished
+- **Diagnosed thin query results**: synthesis was truncating semantic text at 3,000 chars; raised to 8,000 chars and `num_ctx` from 4,096 → 12,288 (no-inject) / 16,384 (with inject).
+- **Rewrote `03_ingest.py`** with heading-aware chunking:
+  - Splits by `##` sections instead of blind 300-word cuts
+  - Prepends `[doc_id] title\n## section\n` to every chunk — LLM always has structural context
+  - Adds `doc_id`, `doc_family`, `title`, `section` metadata fields to every chunk
+  - `--rebuild` flag wipes and rebuilds the collection; `--file X.md` re-indexes one file
+- **Kicked off full ChromaDB rebuild** (`python 03_ingest.py --rebuild`) — running in background on VM, log at `~/jai-archive/logs/ingest_rebuild.log`
+- **Added `_source_where_filter`** to `07_query.py`: uses ChromaDB `where` metadata filter when query names a JAI document ID; falls back to content filter for cask/vendor queries.
+- **Fixed `_DOC_ID_RE`** regex to match IDs with trailing letter (JAI-N006a).
+- **Added auto-inject** in `ask()`: when a JAI doc ID is detected and matching markdown files exist, auto-inject them (scales word budget across files).
+
+### What's Pending
+- Nothing blocking. Query system operational with improved ingestion.
+
+### Immediate Next Steps
+1. **Data quality triage** — fix HTML entity / junk-entity issues, or defer to AWS 70B run
+2. **AWS scaling** — g5.12xlarge spot, llama3.1:70B Q4_K_M, `--workers 4`, rebuild DuckDB, tear down
+
 ## Current Focus
 
-Pipeline and query system are fully operational. Next priorities:
-
-1. **Data quality triage** — decide whether to fix HTML entity / junk-entity issues now (small cleanup script) or defer entirely until 70B model reprocessing on AWS.
-2. **AWS scaling** — when ready: spin up g5.12xlarge spot, install Ollama, pull llama3.1:70B Q4_K_M, re-run `05_extract_tables.py --workers 4`, rebuild DuckDB, tear down instance.
+1. **Data quality triage** — fix HTML entity / junk-entity issues, or defer to AWS 70B run
+2. **AWS scaling** — g5.12xlarge spot, llama3.1:70B Q4_K_M, `--workers 4`, rebuild DuckDB, tear down
 
 ---
 
@@ -59,7 +96,7 @@ Pipeline and query system are fully operational. Next priorities:
 
 ## Blockers
 
-- None. VM stable, pipeline running, query system validated, git set up, auto-updates fixed.
+- None. VM stable, GPU0-only Ollama running, query system operational.
 
 ## Known Debt
 
