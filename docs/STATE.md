@@ -81,29 +81,50 @@
 ### What's Broken or Incomplete
 - Nothing blocking. Query system operational.
 
+### Immediate Next Steps (continued same session)
+- **DuckDB data quality cleanup completed** — see below.
+
+---
+
+## Last Session Summary (2026-05-26 continued)
+
+### What We Accomplished
+- **DuckDB data quality cleanup** in `06_setup_duckdb.py` view definitions (no re-extraction needed):
+  - `facts` view: REGEXP_REPLACE decodes HTML entities (`&#124;` → `|`, `&#38;` → `&`) — 0 remaining
+  - `capacity_summary`: COALESCE fills NULL units by attribute name (MTU/MTHM/year/%/MW) — 0 NULL units remaining
+  - `cask_summary`: filter chain removes junk entities — pure numbers, comma-formatted numbers, scientific notation, numbered list items, path-like strings, column headers with parentheses. Distinct cask_models: 491 → 278
+  - Fixed stale `entity` → `country` column reference in `print_info()`
+- Committed `9c181c9` and pushed.
+
+### What's Broken or Incomplete
+- Nothing blocking. Query system and DuckDB both clean.
+- Some borderline cask_model entries remain ("CANISTERED STORAGE/TRANSPORT SYSTEMS", "Type Cask/Canister") — not worth further filtering at 8B quality; will be clean in AWS 70B run.
+
 ### Immediate Next Steps
-1. **Data quality triage** — decide: fix HTML entity / junk-entity / NULL unit issues now, or defer entirely to the AWS 70B run
-2. **AWS scaling** — g5.12xlarge spot, llama3.1:70B Q4_K_M, `--workers 4`, rebuild DuckDB, tear down
+1. **Fix query routing gaps** (two known issues):
+   - `_SEMANTIC_KEYWORDS` matches "summary of" but not "summary on" — add bare "summary" as trigger
+   - UK/United Kingdom mismatch: SQL queries for `country = 'United Kingdom'` but data may be stored as `'UK'`; verbose output needed to confirm routing path
+2. **Pipeline for new documents** — wire `03_ingest.py` into `ingest.sh` so new docs get ChromaDB-indexed automatically
+3. **Continue query testing** — exercise more query types and document edge cases
 
 ## Current Focus
 
-1. **Data quality triage** — defer to AWS 70B run, or fix select issues now
-2. **AWS scaling** — g5.12xlarge spot, llama3.1:70B Q4_K_M, `--workers 4`, rebuild DuckDB, tear down
+1. Query system improvement and testing
+2. Keeping pipeline smooth for new document ingestion as scanning continues
 
 ---
 
 ## Open Questions
 
-- At what point does data quality degrade enough to block useful queries? Current 8B extraction is sufficient for semantic queries but unreliable for structured cask/cost data.
 - NeatDesk scanning strategy for 15 banker boxes — batching plan, folder organization.
 
 ## Blockers
 
-- None. VM stable, GPU0-only Ollama running, query system operational.
+- None. VM stable, GPU0-only Ollama running, query system and DuckDB operational.
 
 ## Known Debt
 
-- HTML entity decoding in entity names
-- Junk entity filtering for `cask_model`
-- NULL unit population for capacity rows
-- All three improve significantly with 70B model on AWS (see DECISIONS.md)
+- Some borderline junk cask_model entities remain (section headers misclassified) — tolerable at 8B, clean in future 70B run
+- `ingest.sh` does not yet call `03_ingest.py` — must run ChromaDB re-index manually after new docs added
+- `_SEMANTIC_KEYWORDS` too narrow — "summary on" not matched, only "summary of"; bare "summary" should be added
+- UK/United Kingdom entity name mismatch — SQL queries may fail depending on how data was extracted; needs `--verbose` diagnosis
