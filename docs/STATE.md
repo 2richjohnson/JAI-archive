@@ -10,24 +10,6 @@
 
 ---
 
-## Last Session Summary (2026-05-25)
-
-### What We Accomplished
-- **Implemented document injection feature in `07_query.py`**: `--doc`, `--doc2`, `--pages`, `--deep`, `--model` CLI flags; `load_document_context()`, `parse_page_range()`, `two_stage_query()` — all implemented per spec.
-- Feature adds: inject full markdown or PDF pages into query context, two-stage deep dive (ChromaDB retrieval → full document analysis), per-invocation model override.
-- **GPU1 experiment concluded** — `NUM_PARALLEL=1` with qwen2.5:14b crashed Ollama (GPU1 hit 100%, GPU0 barely loaded). Hardware confirmed unreliable under any sustained load.
-- **Permanent GPU1 fix applied**: `CUDA_VISIBLE_DEVICES=0` added to Ollama override; Ollama restarted. GPU1 invisible to Ollama permanently.
-- **`07_query.py` reverted**: `LLM_MODEL` → `llama3.1:8b`, `SQL_MODEL` → `qwen2.5-coder:7b`. Synced to both VM locations.
-
-### What's Broken / Pending
-- Nothing blocking. System is operational.
-
-### Immediate Next Steps
-1. **Data quality triage** — fix HTML entity / junk-entity issues now, or defer to AWS 70B run
-2. **AWS scaling** — g5.12xlarge spot, llama3.1:70B Q4_K_M, `--workers 4`, rebuild DuckDB, tear down
-
----
-
 ## Last Session Summary (2026-05-24)
 
 ### What We Accomplished
@@ -61,100 +43,45 @@
 
 ---
 
-## Last Session Summary (2026-05-26)
-
-### What We Accomplished
-- **GPU1 experiment concluded**: `NUM_PARALLEL=1` with `qwen2.5:14b` crashed Ollama — GPU1 hit 100%, GPU0 barely loaded. Hardware confirmed unreliable. Permanent fix applied: `CUDA_VISIBLE_DEVICES=0` in Ollama override; models reverted to `llama3.1:8b` / `qwen2.5-coder:7b`.
-- **Diagnosed thin query results**: synthesis was truncating semantic text at 3,000 chars, discarding most retrieved chunks. Raised to 8,000 chars; `num_ctx` 4,096 → 12,288 (no-inject) / 16,384 (with inject).
-- **Rewrote `03_ingest.py`** with heading-aware chunking:
-  - Splits by `##` sections instead of blind 300-word word-count cuts
-  - Prepends `[doc_id] title\n## section\n` to every chunk — LLM always has structural context
-  - Stores `doc_id`, `doc_family`, `title`, `section` metadata on every chunk
-  - `--rebuild` flag wipes and rebuilds; `--file X.md` re-indexes one file
-- **Full ChromaDB rebuild completed**: 6,314 chunks from 177 markdown files
-- **Updated `07_query.py`**:
-  - `_source_where_filter`: uses `doc_family`/`doc_id` metadata for clean ChromaDB `where` filtering when query names a JAI document — no more filename prefix-scanning
-  - Fixed `_DOC_ID_RE` regex to match IDs with trailing letter (e.g. JAI-N006a)
-  - Auto-inject matching markdown files when doc ID detected and `--doc` not specified
-- **Tested**: content queries (shootaring canyon) and doc-name queries (JAI-N006 family) both significantly improved. Committed `9cab54c` and pushed.
-
-### What's Broken or Incomplete
-- Nothing blocking. Query system operational.
-
-### Immediate Next Steps (continued same session)
-- **DuckDB data quality cleanup completed** — see below.
-
----
-
-## Last Session Summary (2026-05-26 continued)
-
-### What We Accomplished
-- **DuckDB data quality cleanup** in `06_setup_duckdb.py` view definitions (no re-extraction needed):
-  - `facts` view: REGEXP_REPLACE decodes HTML entities (`&#124;` → `|`, `&#38;` → `&`) — 0 remaining
-  - `capacity_summary`: COALESCE fills NULL units by attribute name (MTU/MTHM/year/%/MW) — 0 NULL units remaining
-  - `cask_summary`: filter chain removes junk entities — pure numbers, comma-formatted numbers, scientific notation, numbered list items, path-like strings, column headers with parentheses. Distinct cask_models: 491 → 278
-  - Fixed stale `entity` → `country` column reference in `print_info()`
-- Committed `9c181c9` and pushed.
-
-### What's Broken or Incomplete
-- Nothing blocking. Query system and DuckDB both clean.
-- Some borderline cask_model entries remain ("CANISTERED STORAGE/TRANSPORT SYSTEMS", "Type Cask/Canister") — not worth further filtering at 8B quality; will be clean in AWS 70B run.
-
-### Immediate Next Steps
-1. **Fix query routing gaps** (two known issues):
-   - `_SEMANTIC_KEYWORDS` matches "summary of" but not "summary on" — add bare "summary" as trigger
-   - UK/United Kingdom mismatch: SQL queries for `country = 'United Kingdom'` but data may be stored as `'UK'`; verbose output needed to confirm routing path
-2. **Pipeline for new documents** — wire `03_ingest.py` into `ingest.sh` so new docs get ChromaDB-indexed automatically
-3. **Continue query testing** — exercise more query types and document edge cases
-
----
-
-## Last Session Summary (2026-05-26 continued — wiki layer)
-
-### What We Accomplished
-- **Implemented wiki generation layer** (`02b_generate_wiki.py`) — new pipeline step between `02_convert.py` and `03_ingest.py`:
-  - Classifies each markdown file by entity type (CASK/COUNTRY/VENDOR/REGULATORY/FACILITY/TOPIC)
-  - Generates structured wiki articles per entity to `~/jai-archive/wiki/{casks,countries,vendors,...}/`
-  - Survey documents (JAI-490) generate multiple articles — one per country/entity detected
-  - Merge logic: new documents enrich existing articles without overwriting
-  - Registry (`wiki/processed_docs.json`) for resumability
-  - CLI: `--doc`, `--force`, `--index-only`, `--validate`, `--stats`
-- **Fixed classification for long survey documents**: initial run missed UK, Korea, Sweden etc. because classification only used first 500 words. Fixed by extracting all `##` headings from full document and passing those alongside the 500-word excerpt.
-- **Fixed entity retrieval in `07_query.py`**: UK article ranked 29th by cosine similarity even though it existed — topic-heavy chunks from other countries outscored it. Added `_wiki_entity_filter()` that loads known entity names from `wiki/` at startup and applies `where={"entity_name": ...}` ChromaDB metadata filter when the query names a known entity. UK query now returns all 13 UK chunks exclusively.
-- **Fixed `_SEMANTIC_KEYWORDS`**: added `"summary on"`, `"give me a summary"`, and bare `"summary"` — "give me a summary on X" now routes to SEMANTIC correctly.
-- **Updated `03_ingest.py`**: auto-detects wiki/ vs markdown/ source; wiki articles get enhanced metadata (`entity_type`, `entity_name`, `source_documents`, `article_section`); `--source wiki/markdown/auto` flag.
-- **Updated `ingest.sh`**: now 6-step pipeline; wiki generation (step 3) and ChromaDB rebuild (step 6) wired in.
-- **Tested JAI-490.md**: generated 24 articles (13 countries, 5 facilities, 3 regulatory, 3 vendors) from one survey document. UK query now returns accurate answer.
-- **Full corpus wiki generation running** in tmux on VM — 177 markdown files, ~5-6 hours total. Started 2026-05-26 18:30.
-
-### What's Broken or Incomplete
-- Wiki generation still running (~157 files remaining as of 19:12).
-- After wiki run completes: need to rebuild ChromaDB (`python 03_ingest.py --rebuild`) to pick up all new articles.
-- Duplicate log lines in `wiki_generation.log` — stdout also redirected to log file in tmux command. Cosmetic only, no functional impact.
-
-### Immediate Next Steps (after wiki run completes)
-1. `python 03_ingest.py --rebuild` — rebuild ChromaDB from all wiki articles
-2. Test queries across multiple entity types (casks, countries, vendors)
-3. `python 02b_generate_wiki.py --validate` — check for broken wikilinks
-4. `python 02b_generate_wiki.py --stats` — review article counts by category
-
 ## Current Focus
 
-1. Wiki generation running on full corpus (background, VM tmux session `wiki`)
-2. After completion: ChromaDB rebuild, then query testing across entity types
+Pipeline and query system are fully operational. Next priorities:
+
+1. **Data quality triage** — decide whether to fix HTML entity / junk-entity issues now (small cleanup script) or defer entirely until 70B model reprocessing on AWS.
+2. **AWS scaling** — when ready: spin up g5.12xlarge spot, install Ollama, pull llama3.1:70B Q4_K_M, re-run `05_extract_tables.py --workers 4`, rebuild DuckDB, tear down instance.
 
 ---
 
 ## Open Questions
 
+- At what point does data quality degrade enough to block useful queries? Current 8B extraction is sufficient for semantic queries but unreliable for structured cask/cost data.
 - NeatDesk scanning strategy for 15 banker boxes — batching plan, folder organization.
 
 ## Blockers
 
-- None. Wiki generation running unattended in tmux.
+- None. VM stable, pipeline running, query system validated, git set up, auto-updates fixed.
 
 ## Known Debt
 
-- Some borderline junk cask_model entities in DuckDB remain (section headers misclassified) — tolerable at 8B, clean in future 70B run
-- Duplicate log lines in `wiki_generation.log` (cosmetic — stdout + FileHandler both writing to log)
-- Wiki articles only cover entities found in the first classification pass — some entities in very long documents may be missed if not in headings (unlikely now that heading scan is implemented)
+- HTML entity decoding in entity names
+- Junk entity filtering for `cask_model`
+- NULL unit population for capacity rows
+- All three improve significantly with 70B model on AWS (see DECISIONS.md)
+
+---
+
+## Last Session Summary (2026-05-27)
+
+### What We Accomplished
+- **Resumed wiki generation** after power surge interrupted previous session at ~88/177 docs processed (288 articles). Resumability via `processed_docs.json` preserved all prior work.
+- **Wiki generation completed**: 592 total articles (304 created, 332 updated) from 210 processed docs. Categories: 196 casks, 35 vendors, 19 regulatory, 17 facilities, 15 countries, 5 topics.
+- **ChromaDB rebuilt** from all 592 wiki articles: **5,850 chunks indexed** (up from 6,314 raw-markdown chunks; wiki chunks are more coherent and entity-focused). Collection confirmed at 5,701 chunks.
+
+### What's Broken / Incomplete
+- Nothing blocking. Query system operational with full wiki-backed ChromaDB.
+
+### Immediate Next Steps
+1. `python 02b_generate_wiki.py --validate` — check for broken wikilinks across all 592 articles
+2. `python 02b_generate_wiki.py --stats` — review article counts by category
+3. Query testing across multiple entity types (casks, countries, vendors, regulatory)
+4. Sync updated STATE.md and any script changes back to local dev machine

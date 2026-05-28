@@ -292,24 +292,24 @@ def _find_matching_docs(prefix: str) -> list[Path]:
 
 
 # ── Wiki entity filter ─────────────────────────────────────────────────────────
-_WIKI_ENTITIES: dict[str, str] | None = None  # {name_lower: canonical_name}
+_WIKI_ENTITIES: dict[str, tuple[str, str]] | None = None  # {name_lower: (canonical_name, entity_type)}
 
-def _load_wiki_entities() -> dict[str, str]:
+def _load_wiki_entities() -> dict[str, tuple[str, str]]:
     """
     Load entity names from the wiki directory on first call.
-    Returns a dict mapping lowercase entity name → canonical name as stored in metadata.
+    Returns a dict mapping lowercase entity name → (canonical_name, entity_type).
     """
     global _WIKI_ENTITIES
     if _WIKI_ENTITIES is not None:
         return _WIKI_ENTITIES
-    entities: dict[str, str] = {}
+    entities: dict[str, tuple[str, str]] = {}
     wiki_dir = BASE_DIR / "wiki"
     for subdir in ("casks", "countries", "vendors", "regulatory", "facilities", "topics"):
         d = wiki_dir / subdir
         if d.exists():
             for article in d.glob("*.md"):
                 canonical = article.stem.replace("_", " ")
-                entities[canonical.lower()] = canonical
+                entities[canonical.lower()] = (canonical, subdir)
     _WIKI_ENTITIES = entities
     return entities
 
@@ -317,17 +317,26 @@ def _load_wiki_entities() -> dict[str, str]:
 def _wiki_entity_filter(question: str) -> dict | None:
     """
     If the query names a wiki entity, return a ChromaDB `where` metadata filter
-    so results come from that entity's article. Matches longest name first to
-    avoid "France" matching inside "French".
+    so results come from that entity's article.
+
+    Checks entity types in priority order so specific entities (countries, casks,
+    facilities) win over broad topic names — e.g. "United Kingdom" (country) beats
+    "Spent Nuclear Fuel Storage" (topic) when both appear in the query.
+    Within a type, longest match wins to avoid "France" matching inside "French".
     """
     entities = _load_wiki_entities()
     if not entities:
         return None
     q_lower = question.lower()
-    # Sort by name length descending so longer matches win
-    for name_lower in sorted(entities, key=len, reverse=True):
-        if name_lower in q_lower:
-            return {"entity_name": {"$eq": entities[name_lower]}}
+    for priority_type in ("countries", "casks", "facilities", "vendors", "regulatory", "topics"):
+        matches = [
+            (name_lower, canonical)
+            for name_lower, (canonical, etype) in entities.items()
+            if etype == priority_type and name_lower in q_lower
+        ]
+        if matches:
+            best = max(matches, key=lambda x: len(x[0]))
+            return {"entity_name": {"$eq": best[1]}}
     return None
 
 

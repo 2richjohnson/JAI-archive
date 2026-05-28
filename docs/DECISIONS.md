@@ -2,6 +2,37 @@
 
 ---
 
+## 2026-05-28: Quartz wiki site (read-only browser UI)
+
+**Decision**: Serve the `~/jai-archive/wiki/` directory as a static website using Quartz v4, behind nginx with HTTPS on port 443. Accessible at `https://192.168.1.198` from any LAN browser.
+
+**Setup**:
+- Quartz v4 installed at `~/quartz/`; `content/` is a symlink to `~/jai-archive/wiki/`
+- `~/jai-archive/wiki/index.md` is a symlink to `INDEX.md` (Quartz requires lowercase)
+- Self-signed TLS cert at `/etc/nginx/ssl/jai.{crt,key}` (10-year validity; accept browser warning once)
+- nginx serves `~/quartz/public/` via `/var/www/jai-archive` symlink (required because nginx's `www-data` user cannot traverse `/home/cccc/` at 755)
+- Quartz build added as step 7 of `ingest.sh` — runs automatically after every ChromaDB rebuild (~2 min)
+
+**Manual rebuild**: `cd ~/quartz && npx quartz build`
+
+**Trade-off**: Read-only. RAG queries still go through `07_query.py` on the VM. A FastAPI bridge layer would be needed to enable query input from the browser — deferred for now.
+
+**Do not** use Quartz v5 (cloned from main branch) — incompatible with Node 22 at time of setup. Use `--branch v4`.
+
+---
+
+## 2026-05-28: Wiki entity filter — priority ordering by entity type
+
+**Decision**: Rewrite `_wiki_entity_filter()` in `07_query.py` to check entity types in priority order (countries → casks → facilities → vendors → regulatory → topics) instead of sorting all matches by name length descending.
+
+**Root cause of bug**: Queries like "give me a summary of spent nuclear fuel **storage** in the United Kingdom" matched `"Spent Nuclear Fuel Storage"` (a topic article, 26 chars) before `"United Kingdom"` (a country article, 14 chars) because topic names are longer. The filter fired but targeted the wrong article, returning generic topic chunks instead of the UK country article.
+
+**Fix**: Within each priority tier, longest match still wins (to avoid "France" matching inside "French"). But a country match always beats a topic match regardless of name length.
+
+**How to apply**: When adding new wiki entity types, slot them into the priority order in `_wiki_entity_filter()`. Specific named entities (countries, casks, facilities) should always rank above broad topic articles.
+
+---
+
 ## 2026-05-26: Wiki generation layer (02b_generate_wiki.py)
 
 **Decision**: Add a wiki generation step between `02_convert.py` and `03_ingest.py`. LLM reads source markdown and generates structured entity-based wiki articles (countries, casks, vendors, facilities, regulatory items, topics) to `~/jai-archive/wiki/`. ChromaDB is rebuilt from wiki articles instead of raw markdown chunks.

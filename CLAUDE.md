@@ -235,14 +235,22 @@ which invokes ChromaDB's default 384-dim embedder and silently returns empty res
 - **NULL units in capacity rows**: Some extracted capacity values have `unit IS NULL` despite being MTU; likely a prompting gap in 05_extract_tables.py
 - **Data quality**: All known issues above become less severe with 70B model (see AWS plan below)
 
-## Query System Status (as of 2026-05-26)
-- **Operational** — wiki generation in progress on full corpus
+## Query System Status (as of 2026-05-28)
+- **Operational** — full wiki corpus complete (592 articles), ChromaDB rebuilt (5,850 chunks)
 - **All routing paths validated**: semantic ✅, structured ✅, hybrid ✅
 - **Flags**: `--doc`, `--doc2`, `--pages`, `--deep`, `--model`, `--verbose`, `--interactive`
 - **Doc-ID queries**: naming a JAI document (e.g. "JAI-N006") triggers metadata filtering + auto-inject of matching markdown files
-- **Wiki entity queries**: naming a known entity (e.g. "United Kingdom", "TN-40") triggers `entity_name` metadata filter — returns that entity's article chunks exclusively
-- ChromaDB: currently 264 chunks from 24 wiki articles (JAI-490 only); will be rebuilt from full wiki after generation completes
+- **Wiki entity queries**: naming a known entity (e.g. "United Kingdom", "TN-40") triggers `entity_name` metadata filter — returns that entity's article chunks exclusively. Entity types checked in priority order: countries → casks → facilities → vendors → regulatory → topics (prevents topic names from shadowing country/cask names in queries)
 - Wiki articles in `~/jai-archive/wiki/` — rebuild ChromaDB after generation: `python 03_ingest.py --rebuild`
+
+## Quartz Wiki Browser UI (as of 2026-05-28)
+- **URL**: `https://192.168.1.198` — accept self-signed cert warning once in Firefox
+- **What it is**: Read-only static site built from `~/jai-archive/wiki/` by Quartz v4
+- **Quartz install**: `~/quartz/` on VM; `content/` symlinks to `~/jai-archive/wiki/`
+- **nginx**: serves `~/quartz/public/` via `/var/www/jai-archive` symlink; TLS cert at `/etc/nginx/ssl/jai.{crt,key}`
+- **Auto-rebuild**: Quartz build is step 7 of `ingest.sh` — runs after every new document ingest (~2 min)
+- **Manual rebuild**: `cd ~/quartz && npx quartz build`
+- **RAG queries**: still via `07_query.py` on the VM — browser UI is browse-only for now
 
 ## Extraction Progress (as of 2026-05-21)
 - Extraction **completed** 2026-05-20 after two crash/resume cycles

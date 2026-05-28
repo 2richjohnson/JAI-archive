@@ -15,33 +15,39 @@ echo "========================================"
 
 # Step 1 — OCR: raw/ → ocr/
 echo ""
-echo "[1/6] OCR  (raw/ → ocr/)"
+echo "[1/7] OCR  (raw/ → ocr/)"
 bash ~/jai-archive/01_ocr.sh
 
 # Step 2 — Markdown conversion: ocr/ → markdown/
 echo ""
-echo "[2/6] Markdown conversion  (ocr/ → markdown/)"
+echo "[2/7] Markdown conversion  (ocr/ → markdown/)"
 python3 02_convert.py
 
 # Step 3 — Wiki generation: markdown/ → wiki/
 echo ""
-echo "[3/6] Wiki generation  (markdown/ → wiki/)"
+echo "[3/7] Wiki generation  (markdown/ → wiki/)"
 python3 02b_generate_wiki.py
 
 # Step 4 — EAV extraction: markdown/ → tables/parquet/
 echo ""
-echo "[4/6] EAV extraction  (markdown/ → tables/parquet/)"
+echo "[4/7] EAV extraction  (markdown/ → tables/parquet/)"
 python3 05_extract_tables.py --workers 2
 
 # Step 5 — Rebuild DuckDB
 echo ""
-echo "[5/6] Rebuilding DuckDB"
+echo "[5/7] Rebuilding DuckDB"
 python3 06_setup_duckdb.py --rebuild
 
 # Step 6 — Rebuild ChromaDB from wiki articles
 echo ""
-echo "[6/6] Rebuilding ChromaDB  (wiki/ → db/)"
+echo "[6/7] Rebuilding ChromaDB  (wiki/ → db/)"
 python3 03_ingest.py --rebuild
+
+# Step 7 — Rebuild Quartz wiki site
+echo ""
+echo "[7/7] Rebuilding Quartz wiki site"
+cd ~/quartz && npx quartz build 2>&1 | tail -3
+cd ~/jai-archive
 
 echo ""
 echo "========================================"
